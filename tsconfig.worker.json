@@ -18,7 +18,9 @@
     "lib/time.ts",
     "lib/signals.ts",
     "lib/candles.ts",
-    "lib/mongo.ts",
+    "lib/sqlite.ts",
+    "lib/node-sqlite.d.ts",
+    "lib/breadth.ts",
     "lib/store.ts"
   ]
 }

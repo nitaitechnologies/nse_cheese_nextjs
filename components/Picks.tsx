@@ -96,6 +96,10 @@ export default function Picks() {
             Stocks checked on{" "}
             <Link href="/breaks" className="text-gold">
               Breaks
+            </Link>{" "}
+            or{" "}
+            <Link href="/probes" className="text-gold">
+              Probed
             </Link>
             . Reset clears every check.
           </p>

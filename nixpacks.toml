@@ -1,14 +1,12 @@
-# Coolify build pack: Nixpacks. One container runs the site and the worker.
-# Set the application port to 3000. The public domain does not need a service name.
+# Coolify reads this when the application build pack is Nixpacks.
+# One container runs the website and the Kite worker. Coolify serves HTTPS.
 
 [variables]
 NIXPACKS_NODE_VERSION = "22"
 
-[phases.install]
-cmds = ["npm ci --include=dev"]
-
 [phases.build]
-cmds = ["npm run build", "npm run build:worker"]
+cmds = ["npm run build"]
+dependsOn = ["install"]
 
 [start]
-cmd = "node scripts/start-production.mjs"
+cmd = "npm run start"

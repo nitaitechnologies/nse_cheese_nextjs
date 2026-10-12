@@ -1,4 +1,3 @@
-import { getClient } from "../lib/mongo";
 import { syncConstituents } from "../worker/constituents";
 
 async function main(): Promise<void> {
@@ -17,11 +16,7 @@ async function main(): Promise<void> {
   );
 }
 
-main()
-  .catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await getClient().close();
-  });
+main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

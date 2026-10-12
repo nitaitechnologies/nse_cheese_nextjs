@@ -8,6 +8,7 @@ import { endSession } from "./api";
 const links = [
   { href: "/", label: "Today" },
   { href: "/breaks", label: "Breaks" },
+  { href: "/probes", label: "Probed" },
   { href: "/picks", label: "Picked" },
   { href: "/indices", label: "Indices" },
   { href: "/stocks", label: "Stocks" },
@@ -17,7 +18,11 @@ const links = [
 
 export default function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const wide = pathname === "/" || pathname.startsWith("/breaks") || pathname.startsWith("/picks");
+  const wide =
+    pathname === "/" ||
+    pathname.startsWith("/breaks") ||
+    pathname.startsWith("/probes") ||
+    pathname.startsWith("/picks");
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
 

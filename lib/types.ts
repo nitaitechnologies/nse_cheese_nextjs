@@ -163,6 +163,17 @@ export type BreakEvent = {
   ts: number;
   close: number;
   strength: number;
+  probeTime?: string;
+};
+
+export type Probe = {
+  side: Side;
+  time: string;
+  ts: number;
+  close: number;
+  level: number;
+  probeTime: string;
+  probeTs: number;
 };
 
 export type StockRow = {

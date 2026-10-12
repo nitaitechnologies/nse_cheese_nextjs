@@ -1,22 +1,19 @@
-# Coolify: build pack Docker Compose. Do not use Nixpacks or Raw Compose.
-# Domain goes on the web service only. In Domains, the value is the public
-# host plus the container port, for example https://nitaidemo.in.net:3000
-# Visitors still use https://nitaidemo.in.net. The :3000 tells the proxy
-# which port inside the container receives traffic.
-# Leave worker private. It is reached at http://worker:4001 on this stack's network.
-# A stack deploy rebuilds and restarts the worker, which drops the Kite socket
-# until it reconnects. Avoid deploying during market hours.
+name: nse-cheese
+
+# Local development uses npm run dev and npm run dev:worker, which share
+# data/nse.sqlite. The public site is a Coolify Nixpacks application.
+# docs/server-setup.md is the runbook.
 
 services:
   web:
+    image: ${WEB_IMAGE:-nse-cheese-web:latest}
     build:
       context: .
       dockerfile: Dockerfile.web
     expose:
       - "3000"
     environment:
-      MONGODB_URI: ${MONGODB_URI:?}
-      MONGODB_DB: ${MONGODB_DB:-nse_cheese}
+      SQLITE_PATH: /data/nse.sqlite
       SESSION_SECRET: ${SESSION_SECRET:?}
       DASHBOARD_PASSWORD_HASH_B64: ${DASHBOARD_PASSWORD_HASH_B64:?}
       KITE_API_KEY: ${KITE_API_KEY:?}
@@ -24,6 +21,8 @@ services:
       KITE_REDIRECT_URL: ${KITE_REDIRECT_URL:?}
       WORKER_INTERNAL_URL: http://worker:4001
       TZ: Asia/Kolkata
+    volumes:
+      - ./sqlite-data:/data
     depends_on:
       worker:
         condition: service_healthy
@@ -42,18 +41,20 @@ services:
       start_period: 40s
 
   worker:
+    image: ${WORKER_IMAGE:-nse-cheese-worker:latest}
     build:
       context: .
       dockerfile: Dockerfile.worker
     environment:
-      MONGODB_URI: ${MONGODB_URI:?}
-      MONGODB_DB: ${MONGODB_DB:-nse_cheese}
+      SQLITE_PATH: /data/nse.sqlite
       KITE_API_KEY: ${KITE_API_KEY:?}
       KITE_API_SECRET: ${KITE_API_SECRET:?}
       PUSHOVER_APP_TOKEN: ${PUSHOVER_APP_TOKEN:-}
       PUSHOVER_USER_KEY: ${PUSHOVER_USER_KEY:-}
       WORKER_PORT: "4001"
       TZ: Asia/Kolkata
+    volumes:
+      - ./sqlite-data:/data
     expose:
       - "4001"
     restart: unless-stopped

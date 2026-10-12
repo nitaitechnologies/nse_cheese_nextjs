@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import cron from "node-cron";
 import { envOptional } from "../lib/env";
-import { readyDb } from "../lib/mongo";
+import { readyDb } from "../lib/sqlite";
 import {
   claimJob,
   claimNotice,

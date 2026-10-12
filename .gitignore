@@ -37,6 +37,10 @@ yarn-error.log*
 # worker build
 /dist
 
+# local and server sqlite files
+/data/
+/sqlite-data/
+
 # vercel
 .vercel
 

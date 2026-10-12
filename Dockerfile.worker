@@ -16,10 +16,23 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV TZ=Asia/Kolkata
 ENV WORKER_PORT=4001
-RUN addgroup -S app && adduser -S app -G app
+RUN addgroup -S app && adduser -S app -G app \
+  && apk add --no-cache su-exec \
+  && printf '%s\n' \
+    '#!/bin/sh' \
+    'set -eu' \
+    'data_dir=$(dirname "${SQLITE_PATH:-/data/nse.sqlite}")' \
+    'mkdir -p "$data_dir"' \
+    'if [ "$(id -u)" = 0 ]; then' \
+    '  chown -R app:app "$data_dir"' \
+    '  exec su-exec app "$@"' \
+    'fi' \
+    'exec "$@"' \
+    > /entrypoint.sh \
+  && chmod +x /entrypoint.sh
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder --chown=app:app /app/dist ./dist
-USER app
 EXPOSE 4001
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "dist/worker/index.js"]

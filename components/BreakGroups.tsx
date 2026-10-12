@@ -51,16 +51,25 @@ function Cards({
   );
 }
 
+const DEFAULT_HEADINGS = {
+  high: "High breakouts",
+  low: "Low breakouts",
+  emptyHigh: "No high break yet.",
+  emptyLow: "No low break yet.",
+};
+
 export default function BreakGroups({
   stocks,
   render,
   extra,
   columns = 1,
+  headings = DEFAULT_HEADINGS,
 }: {
   stocks: BreakPickRow[];
   render: (stock: BreakPickRow, side: Side) => ReactNode;
   extra?: ReactNode;
   columns?: 1 | 2;
+  headings?: typeof DEFAULT_HEADINGS;
 }) {
   const [tab, setTab] = useState<Tab>("all");
   const high = sideStocks(stocks, "PDH");
@@ -89,9 +98,9 @@ export default function BreakGroups({
       </div>
       {tab !== "PDL" ? (
         <>
-          <Heading label="High breakouts" count={high.length} tone="text-up" />
+          <Heading label={headings.high} count={high.length} tone="text-up" />
           {high.length === 0 ? (
-            <p className="text-sm text-muted">No high break yet.</p>
+            <p className="text-sm text-muted">{headings.emptyHigh}</p>
           ) : (
             <Cards stocks={high} side="PDH" columns={columns} render={render} />
           )}
@@ -99,9 +108,9 @@ export default function BreakGroups({
       ) : null}
       {tab !== "PDH" ? (
         <>
-          <Heading label="Low breakouts" count={low.length} tone="text-down" />
+          <Heading label={headings.low} count={low.length} tone="text-down" />
           {low.length === 0 ? (
-            <p className="text-sm text-muted">No low break yet.</p>
+            <p className="text-sm text-muted">{headings.emptyLow}</p>
           ) : (
             <Cards stocks={low} side="PDL" columns={columns} render={render} />
           )}

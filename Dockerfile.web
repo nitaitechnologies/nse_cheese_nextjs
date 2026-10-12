@@ -17,10 +17,23 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV TZ=Asia/Kolkata
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
-RUN addgroup -S app && adduser -S app -G app
+RUN addgroup -S app && adduser -S app -G app \
+  && apk add --no-cache su-exec \
+  && printf '%s\n' \
+    '#!/bin/sh' \
+    'set -eu' \
+    'data_dir=$(dirname "${SQLITE_PATH:-/data/nse.sqlite}")' \
+    'mkdir -p "$data_dir"' \
+    'if [ "$(id -u)" = 0 ]; then' \
+    '  chown -R app:app "$data_dir"' \
+    '  exec su-exec app "$@"' \
+    'fi' \
+    'exec "$@"' \
+    > /entrypoint.sh \
+  && chmod +x /entrypoint.sh
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=app:app /app/.next/standalone ./
 COPY --from=builder --chown=app:app /app/.next/static ./.next/static
-USER app
 EXPOSE 3000
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "server.js"]

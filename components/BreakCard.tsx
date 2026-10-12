@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import CopySymbol from "./CopySymbol";
-import { eventText } from "./EventFilters";
+import { eventLine } from "./EventFilters";
 import { money, signed, signedPct, tone } from "./format";
 import type { StockBoardRow } from "@/lib/types";
 
@@ -40,7 +40,7 @@ export default function BreakCard({
       ) : (
         stock.events.map((event) => (
           <p key={event.side} className={`mt-1 text-xs ${event.side === "PDH" ? "text-up" : "text-down"}`}>
-            {eventText(event.side)} · {event.time} IST
+            {eventLine(event)}
           </p>
         ))
       )}

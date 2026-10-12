@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detectBreaks, eventVisible } from "./signals";
+import { detectBreaks, detectProbes, eventVisible } from "./signals";
 import {
   addCalendarDays,
   bucketFromDate,
@@ -101,6 +101,78 @@ describe("previous-day break scoring", () => {
     assert.equal(breaks[0]?.volumeScore, 1);
     assert.equal(breaks[0]?.depthScore, 1);
     assert.ok((breaks[0]?.strength ?? 5) <= 2);
+  });
+});
+
+describe("failed probes", () => {
+  it("keeps a high that closed back below and has not closed above again", () => {
+    const probes = detectProbes({
+      pdh: 100,
+      pdl: 90,
+      candles: [
+        candle("09:15", 99, 99.5, 98.5, 99.2, 100),
+        candle("09:20", 99.4, 100.8, 99.3, 100.4, 200),
+        candle("09:25", 100.3, 100.6, 99.4, 99.7, 180),
+      ],
+    });
+    assert.equal(probes.length, 1);
+    assert.equal(probes[0]?.side, "PDH");
+    assert.equal(probes[0]?.probeTime, "09:20");
+    assert.equal(probes[0]?.time, "09:25");
+  });
+
+  it("drops a high after it closes above again", () => {
+    const probes = detectProbes({
+      pdh: 100,
+      pdl: 90,
+      candles: [
+        candle("09:20", 99.4, 100.8, 99.3, 100.4, 200),
+        candle("09:25", 100.3, 100.6, 99.4, 99.7, 180),
+        candle("09:30", 99.8, 101, 99.7, 100.6, 220),
+        candle("09:35", 100.4, 100.5, 99.2, 99.5, 160),
+      ],
+    });
+    assert.equal(probes.length, 0);
+  });
+
+  it("keeps a low that closed back above and has not closed below again", () => {
+    const probes = detectProbes({
+      pdh: 110,
+      pdl: 100,
+      candles: [
+        candle("09:15", 100.2, 100.4, 99.2, 99.6, 100),
+        candle("09:20", 99.7, 100.4, 99.5, 100.2, 120),
+      ],
+    });
+    assert.equal(probes.length, 1);
+    assert.equal(probes[0]?.side, "PDL");
+    assert.equal(probes[0]?.probeTime, "09:15");
+    assert.equal(probes[0]?.time, "09:20");
+  });
+
+  it("drops a low after it closes below again", () => {
+    const probes = detectProbes({
+      pdh: 110,
+      pdl: 100,
+      candles: [
+        candle("09:15", 100.2, 100.4, 99.2, 99.6, 100),
+        candle("09:20", 99.7, 100.4, 99.5, 100.2, 120),
+        candle("09:25", 100.1, 100.3, 99.4, 99.7, 140),
+      ],
+    });
+    assert.equal(probes.length, 0);
+  });
+
+  it("ignores a wick that does not close through the level", () => {
+    const probes = detectProbes({
+      pdh: 100,
+      pdl: 90,
+      candles: [
+        candle("09:15", 99, 101.2, 98.8, 99.6, 100),
+        candle("09:20", 99.5, 99.8, 99.1, 99.4, 100),
+      ],
+    });
+    assert.equal(probes.length, 0);
   });
 });
 

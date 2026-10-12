@@ -1,4 +1,4 @@
-import type { Breakout, Candle, Score, Side } from "./types";
+import type { Breakout, Candle, Probe, Score, Side } from "./types";
 
 export type EventFilter = "all" | "break" | "PDH" | "PDL" | "none";
 
@@ -129,4 +129,43 @@ export function detectBreaks(input: {
   });
 
   return breaks;
+}
+
+function crossed(close: number, level: number, side: Side, beyond: boolean): boolean {
+  if (side === "PDH") return beyond ? close > level : close < level;
+  return beyond ? close < level : close > level;
+}
+
+function probeSide(candles: Candle[], level: number, side: Side): Probe | null {
+  if (!(level > 0)) return null;
+  let probed: Candle | null = null;
+  let returned: Candle | null = null;
+  for (const candle of candles) {
+    if (!probed) {
+      if (crossed(candle.close, level, side, true)) probed = candle;
+      continue;
+    }
+    if (!returned) {
+      if (crossed(candle.close, level, side, false)) returned = candle;
+      continue;
+    }
+    if (crossed(candle.close, level, side, true)) return null;
+  }
+  if (!probed || !returned) return null;
+  return {
+    side,
+    time: returned.time,
+    ts: returned.ts,
+    close: returned.close,
+    level,
+    probeTime: probed.time,
+    probeTs: probed.ts,
+  };
+}
+
+export function detectProbes(input: { candles: Candle[]; pdh: number; pdl: number }): Probe[] {
+  const ordered = [...input.candles].sort((a, b) => a.ts - b.ts);
+  return [probeSide(ordered, input.pdh, "PDH"), probeSide(ordered, input.pdl, "PDL")].filter(
+    (probe): probe is Probe => probe != null,
+  );
 }

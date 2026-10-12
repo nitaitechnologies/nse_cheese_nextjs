@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["mongodb", "kiteconnect", "bcryptjs"],
+  serverExternalPackages: ["kiteconnect", "bcryptjs"],
   turbopack: {
     rules: {
       "*.css": {

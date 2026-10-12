@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/mongo";
+import { getDb, readyDb } from "@/lib/sqlite";
 
 export async function GET() {
   try {
-    const db = await getDb();
-    await db.command({ ping: 1 });
+    await readyDb();
+    getDb().prepare("SELECT 1").get();
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ ok: false }, { status: 503 });

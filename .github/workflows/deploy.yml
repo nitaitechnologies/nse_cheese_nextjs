@@ -1,0 +1,73 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image names
+        id: names
+        run: |
+          repo="$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          echo "web=ghcr.io/${repo}-web:latest" >> "$GITHUB_OUTPUT"
+          echo "worker=ghcr.io/${repo}-worker:latest" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          tags: ${{ steps.names.outputs.web }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: ${{ steps.names.outputs.worker }}
+
+      - name: Update the server
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          WEB_IMAGE: ${{ steps.names.outputs.web }}
+          WORKER_IMAGE: ${{ steps.names.outputs.worker }}
+        run: |
+          set -eu
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          port="${SSH_PORT:-22}"
+          target="${SSH_USER}@${SSH_HOST}"
+          ssh_opts=(-i ~/.ssh/deploy_key -p "$port" -o StrictHostKeyChecking=accept-new)
+          scp_opts=(-i ~/.ssh/deploy_key -P "$port" -o StrictHostKeyChecking=accept-new)
+          ssh "${ssh_opts[@]}" "$target" "mkdir -p /opt/nse-cheese"
+          scp "${scp_opts[@]}" docker-compose.yml "${target}:/opt/nse-cheese/"
+          printf '%s' "$GH_TOKEN" | ssh "${ssh_opts[@]}" "$target" "docker login ghcr.io -u '${GH_ACTOR}' --password-stdin"
+          ssh "${ssh_opts[@]}" "$target" "cd /opt/nse-cheese && WEB_IMAGE='${WEB_IMAGE}' WORKER_IMAGE='${WORKER_IMAGE}' docker compose pull && WEB_IMAGE='${WEB_IMAGE}' WORKER_IMAGE='${WORKER_IMAGE}' docker compose up -d --no-build --remove-orphans"
