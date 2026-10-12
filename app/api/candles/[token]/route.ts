@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { priceChange } from "@/lib/breadth";
 import { mergeCandles } from "@/lib/candles";
 import { unauthorized } from "@/lib/guard";
 import { detectBreaks } from "@/lib/signals";
@@ -9,6 +10,7 @@ import {
   getPreviousSessionCandles,
   indexCardsForInstrument,
   listQuotes,
+  sessionPrice,
 } from "@/lib/store";
 import { istDateString } from "@/lib/time";
 
@@ -49,6 +51,8 @@ export async function GET(
     }
   }
   const indices = await indexCardsForInstrument(token, date);
+  const quote = await sessionPrice(token, date);
+  const last = quote.last ?? candles.at(-1)?.close ?? null;
   return NextResponse.json({
     instrument_token: token,
     tradingsymbol: instrument.tradingsymbol,
@@ -56,6 +60,9 @@ export async function GET(
     date,
     pdh: previous?.high ?? null,
     pdl: previous?.low ?? null,
+    last,
+    prevClose: quote.prevClose,
+    ...priceChange(last, quote.prevClose),
     candles,
     signals,
     indices,

@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { IChartApi, IPriceLine, ISeriesApi, LineStyle, SeriesMarker, UTCTimestamp } from "lightweight-charts";
+import { priceChange } from "@/lib/breadth";
+import { chartUnix } from "@/lib/time";
 import { api } from "./api";
-import { money } from "./format";
+import { money, signed, signedPct, tone } from "./format";
 import BreadthPie from "./Pie";
 import type { Candle, IndexCard, Side } from "@/lib/types";
 
@@ -15,6 +17,10 @@ type ChartPayload = {
   date: string;
   pdh: number | null;
   pdl: number | null;
+  last: number | null;
+  prevClose: number | null;
+  change: number | null;
+  changePct: number | null;
   candles: Candle[];
   signals: Array<{ time: string; ts: number; side: Side; strength: number }>;
   indices: IndexCard[];
@@ -78,7 +84,8 @@ export default function ChartPanel({
         const candles = current.candles.filter((candle) => candle.time !== message.candle.time);
         candles.push(message.candle);
         candles.sort((a, b) => a.ts - b.ts);
-        return { ...current, candles };
+        const last = message.candle.close;
+        return { ...current, candles, last, ...priceChange(last, current.prevClose) };
       });
     });
     source.addEventListener("breakout", () => {
@@ -162,7 +169,7 @@ export default function ChartPanel({
     if (!ready || !payload || !series || !volume) return;
     series.setData(
       payload.candles.map((candle) => ({
-        time: candle.ts as UTCTimestamp,
+        time: chartUnix(candle.ts) as UTCTimestamp,
         open: candle.open,
         high: candle.high,
         low: candle.low,
@@ -171,7 +178,7 @@ export default function ChartPanel({
     );
     volume.setData(
       payload.candles.map((candle) => ({
-        time: candle.ts as UTCTimestamp,
+        time: chartUnix(candle.ts) as UTCTimestamp,
         value: candle.volume,
         color: candle.close >= candle.open ? "rgba(125,255,161,0.45)" : "rgba(255,141,132,0.45)",
       })),
@@ -198,7 +205,7 @@ export default function ChartPanel({
     }
     markersRef.current?.setMarkers(
       payload.signals.map((signal) => ({
-        time: signal.ts as UTCTimestamp,
+        time: chartUnix(signal.ts) as UTCTimestamp,
         position: signal.side === "PDH" ? "aboveBar" : "belowBar",
         color: signal.side === "PDH" ? "#e6c27a" : "#ff8d84",
         shape: signal.side === "PDH" ? "arrowUp" : "arrowDown",
@@ -219,11 +226,20 @@ export default function ChartPanel({
         </Link>
         <div className="text-right">
           <h1 className="text-lg font-semibold">{payload?.tradingsymbol ?? "Chart"}</h1>
-          <p className="text-xs text-muted">
-            {payload
-              ? `${payload.name} · ${payload.date} · PDH ${money(payload.pdh)} · PDL ${money(payload.pdl)}`
-              : "Loading"}
-          </p>
+          {payload ? (
+            <>
+              <p className={`font-mono text-sm ${tone(payload.change)}`}>LTP {money(payload.last)}</p>
+              <p className={`font-mono text-xs ${tone(payload.change)}`}>
+                {signed(payload.change)} · {signedPct(payload.changePct)}
+              </p>
+              <p className="font-mono text-xs text-muted">Prev close {money(payload.prevClose)}</p>
+              <p className="text-xs text-muted">
+                {payload.name} · {payload.date} · PDH {money(payload.pdh)} · PDL {money(payload.pdl)}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted">Loading</p>
+          )}
         </div>
       </div>
       {error ? <p className="mt-4 text-sm text-down">{error}</p> : null}

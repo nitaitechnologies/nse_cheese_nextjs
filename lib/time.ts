@@ -71,6 +71,11 @@ export function istTimestamp(dateStr: string, time: string): number {
   return Math.floor(utcMs / 1000);
 }
 
+/** Unix seconds shifted so a UTC chart axis prints IST wall-clock time. */
+export function chartUnix(unixSeconds: number): number {
+  return unixSeconds + IST_OFFSET_MS / 1000;
+}
+
 export function addCalendarDays(dateStr: string, days: number): string {
   const noon = istTimestamp(dateStr, "12:00");
   return istDateString(new Date((noon + days * 86400) * 1000));

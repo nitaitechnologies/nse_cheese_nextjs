@@ -4,6 +4,7 @@ import { detectBreaks, detectProbes, eventVisible } from "./signals";
 import {
   addCalendarDays,
   bucketFromDate,
+  chartUnix,
   istTimestamp,
   weekdayDates,
 } from "./time";
@@ -32,6 +33,8 @@ function candle(
 describe("IST session clock", () => {
   it("anchors 5-minute buckets to 09:15 IST", () => {
     assert.equal(new Date(istTimestamp("2026-10-12", "09:15") * 1000).toISOString(), "2026-10-12T03:45:00.000Z");
+    assert.equal(new Date(chartUnix(istTimestamp("2026-10-12", "09:15")) * 1000).toISOString(), "2026-10-12T09:15:00.000Z");
+    assert.equal(new Date(chartUnix(istTimestamp("2026-10-12", "15:05")) * 1000).toISOString(), "2026-10-12T15:05:00.000Z");
     assert.equal(bucketFromDate(new Date(istTimestamp("2026-10-12", "09:14") * 1000)), null);
     assert.deepEqual(bucketFromDate(new Date(istTimestamp("2026-10-12", "09:15") * 1000)), {
       date: "2026-10-12",

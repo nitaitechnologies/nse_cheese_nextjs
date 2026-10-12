@@ -1290,6 +1290,15 @@ async function boardPrices(
   return map;
 }
 
+export async function sessionPrice(
+  token: number,
+  dateKey: string,
+): Promise<{ last: number | null; prevClose: number | null; change: number | null; changePct: number | null }> {
+  const prices = await boardPrices([token], dateKey);
+  const price = prices.get(token) ?? { last: null, prevClose: null };
+  return { last: price.last, prevClose: price.prevClose, ...priceChange(price.last, price.prevClose) };
+}
+
 async function previousCloses(tokens: number[], beforeDate: string): Promise<Map<number, number>> {
   const map = new Map<number, number>();
   if (tokens.length === 0) return map;
