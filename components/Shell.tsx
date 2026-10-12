@@ -1,0 +1,71 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState, type ReactNode } from "react";
+import { endSession } from "./api";
+
+const links = [
+  { href: "/", label: "Today" },
+  { href: "/breaks", label: "Breaks" },
+  { href: "/picks", label: "Picked" },
+  { href: "/indices", label: "Indices" },
+  { href: "/stocks", label: "Stocks" },
+  { href: "/backtest", label: "Replay" },
+  { href: "/settings", label: "Setup" },
+];
+
+export default function Shell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const wide = pathname === "/" || pathname.startsWith("/breaks") || pathname.startsWith("/picks");
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+
+  async function logout() {
+    setLoggingOut(true);
+    setLogoutError("");
+    try {
+      await endSession();
+    } catch (err) {
+      setLoggingOut(false);
+      setLogoutError(err instanceof Error ? err.message : "Could not log out");
+    }
+  }
+
+  return (
+    <div className="flex min-h-dvh">
+      <aside className="sticky top-0 z-20 flex h-dvh w-40 shrink-0 flex-col border-r border-line bg-panel px-3 pt-[max(1rem,env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)]">
+        <p className="px-2 text-xs uppercase tracking-[0.18em] text-muted">Breakouts</p>
+        <nav className="mt-4 flex flex-1 flex-col gap-1">
+          {links.map((link) => {
+            const active = link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                aria-current={active ? "page" : undefined}
+                className={`flex min-h-11 items-center rounded-xl px-3 text-sm font-medium ${
+                  active ? "bg-panel-2 text-gold" : "text-muted"
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
+        </nav>
+        {logoutError ? <p className="mb-2 px-2 text-xs text-down">{logoutError}</p> : null}
+        <button
+          type="button"
+          className="mb-3 flex min-h-11 items-center rounded-xl border border-line px-3 text-sm font-medium text-down disabled:opacity-60"
+          disabled={loggingOut}
+          onClick={() => void logout()}
+        >
+          {loggingOut ? "Signing out…" : "Log out"}
+        </button>
+      </aside>
+      <div className="min-w-0 flex-1">
+        <div className={`mx-auto min-h-dvh w-full ${wide ? "max-w-7xl" : "max-w-5xl"}`}>{children}</div>
+      </div>
+    </div>
+  );
+}

@@ -4,23 +4,37 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:worker": "node --env-file=.env node_modules/tsx/dist/cli.mjs watch worker/index.ts",
     "build": "next build",
+    "build:worker": "tsc -p tsconfig.worker.json",
     "start": "next start",
+    "start:worker": "node --env-file=.env dist/worker/index.js",
+    "hash-password": "tsx scripts/hash-password.ts",
+    "test": "tsx --test lib/engine.test.ts lib/breadth.test.ts lib/nse-indices.test.ts lib/kite-origin.test.ts",
     "lint": "eslint"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.12",
+    "kiteconnect": "^5.3.0",
+    "lightweight-charts": "^5.2.1",
+    "mongodb": "^7.7.0",
     "next": "16.4.0",
+    "node-cron": "^4.6.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
+    "@types/node-cron": "^3.0.11",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

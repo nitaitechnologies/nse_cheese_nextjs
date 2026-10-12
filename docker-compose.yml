@@ -1,0 +1,72 @@
+# Coolify: build pack Docker Compose. Do not use Nixpacks or Raw Compose.
+# Domain goes on the web service only. In Domains, the value is the public
+# host plus the container port, for example https://nitaidemo.in.net:3000
+# Visitors still use https://nitaidemo.in.net. The :3000 tells the proxy
+# which port inside the container receives traffic.
+# Leave worker private. It is reached at http://worker:4001 on this stack's network.
+# A stack deploy rebuilds and restarts the worker, which drops the Kite socket
+# until it reconnects. Avoid deploying during market hours.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    expose:
+      - "3000"
+    environment:
+      MONGODB_URI: ${MONGODB_URI:?}
+      MONGODB_DB: ${MONGODB_DB:-nse_cheese}
+      SESSION_SECRET: ${SESSION_SECRET:?}
+      DASHBOARD_PASSWORD_HASH_B64: ${DASHBOARD_PASSWORD_HASH_B64:?}
+      KITE_API_KEY: ${KITE_API_KEY:?}
+      KITE_API_SECRET: ${KITE_API_SECRET:?}
+      KITE_REDIRECT_URL: ${KITE_REDIRECT_URL:?}
+      WORKER_INTERNAL_URL: http://worker:4001
+      TZ: Asia/Kolkata
+    depends_on:
+      worker:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      MONGODB_URI: ${MONGODB_URI:?}
+      MONGODB_DB: ${MONGODB_DB:-nse_cheese}
+      KITE_API_KEY: ${KITE_API_KEY:?}
+      KITE_API_SECRET: ${KITE_API_SECRET:?}
+      PUSHOVER_APP_TOKEN: ${PUSHOVER_APP_TOKEN:-}
+      PUSHOVER_USER_KEY: ${PUSHOVER_USER_KEY:-}
+      WORKER_PORT: "4001"
+      TZ: Asia/Kolkata
+    expose:
+      - "4001"
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4001/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s

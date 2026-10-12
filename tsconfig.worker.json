@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "sourceMap": true
+  },
+  "include": [
+    "worker/**/*.ts",
+    "lib/env.ts",
+    "lib/types.ts",
+    "lib/time.ts",
+    "lib/signals.ts",
+    "lib/candles.ts",
+    "lib/mongo.ts",
+    "lib/store.ts"
+  ]
+}
