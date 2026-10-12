@@ -1,39 +1,28 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseIndexBook } from "./nse-indices";
+import { parseConstituentCsv } from "./nse-indices";
+
+const SAMPLE = `Company Name,Industry,Symbol,Series,ISIN Code
+Abbott India Ltd.,Healthcare,ABBOTINDIA,EQ,INE358A01014
+Abbott India Ltd.,Healthcare,ABBOTINDIA,EQ,INE358A01014
+Lupin Ltd.,Healthcare,LUPIN,EQ,INE326A01037
+`;
 
 describe("NSE index constituents", () => {
-  it("keeps the short symbol and drops the index row", () => {
-    const book = parseIndexBook("NIFTY HEALTHCARE", {
-      data: {
-        data: [
-          { symbol: "NIFTY HEALTHCARE INDEX", identifier: "NIFTY HEALTHCARE INDEX", series: null },
-          { symbol: "ABBOTINDIA", series: "EQ", companyName: "ABBOTT INDIA LIMITED" },
-          { symbol: "ABBOTINDIA", series: "EQ", companyName: "ABBOTT INDIA LIMITED" },
-          { symbol: "LUPIN", series: "EQ", companyName: "LUPIN LIMITED" },
-        ],
-      },
-    });
+  it("reads symbols from the constituent file and drops duplicates", () => {
+    const book = parseConstituentCsv("NIFTY HEALTHCARE", SAMPLE);
     assert.equal(book.symbol, "NIFTY HEALTHCARE");
     assert.equal(book.name, "NIFTY HEALTHCARE");
     assert.deepEqual(book.stocks, [
-      { tradingsymbol: "ABBOTINDIA", name: "ABBOTT INDIA LIMITED" },
-      { tradingsymbol: "LUPIN", name: "LUPIN LIMITED" },
+      { tradingsymbol: "ABBOTINDIA", name: "Abbott India Ltd." },
+      { tradingsymbol: "LUPIN", name: "Lupin Ltd." },
     ]);
   });
 
-  it("rejects a payload that has no stocks", () => {
+  it("rejects a file that has no stocks", () => {
     assert.throws(
-      () =>
-        parseIndexBook("NIFTY 50", {
-          data: {
-            data: [
-              { symbol: "NIFTY 50", series: null },
-              { symbol: "NIFTY 50", series: null },
-            ],
-          },
-        }),
-      /no stocks/,
+      () => parseConstituentCsv("NIFTY 50", "Company Name,Industry,Symbol,Series,ISIN Code\n"),
+      /no constituents/,
     );
   });
 });

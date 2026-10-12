@@ -153,9 +153,10 @@ function onTicks(ticks: Tick[]): void {
 }
 
 export function publishForming(): void {
+  const rows = [];
   for (const [token, book] of books) {
     if (!book.forming) continue;
-    broadcast("candle", {
+    rows.push({
       instrument_token: token,
       tradingsymbol: book.tradingsymbol,
       date: book.date,
@@ -163,6 +164,8 @@ export function publishForming(): void {
       forming: true,
     });
   }
+  if (rows.length === 0) return;
+  broadcast("quotes", rows);
 }
 
 export async function flushQuotes(): Promise<void> {

@@ -41,6 +41,7 @@ let reconciling = false;
 let bootstrapping = false;
 let syncDone = false;
 let catchUpQueued = false;
+let bootstrapNotBefore = 0;
 let loggedFeed = -1;
 
 function statusMessage(hasToken: boolean): string {
@@ -141,13 +142,14 @@ async function runJobs(): Promise<void> {
 
 function kickBootstrap(): void {
   if (bootstrapping || (syncDone && catchUpQueued)) return;
+  if (Date.now() < bootstrapNotBefore) return;
   bootstrapping = true;
   void (async () => {
     try {
       if (!syncDone) {
         await syncConstituents();
         syncDone = true;
-        console.log("[worker] index stocks and index prices synced");
+        console.log("[worker] index stocks synced");
       }
       if (!catchUpQueued) {
         await requeueInterruptedJobs();
@@ -157,6 +159,7 @@ function kickBootstrap(): void {
         console.log("[worker] catch-up queued from the last stored bar");
       }
     } catch (error) {
+      bootstrapNotBefore = Date.now() + 60_000;
       console.error("[worker] startup catch-up failed", error);
     } finally {
       bootstrapping = false;

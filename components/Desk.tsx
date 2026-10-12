@@ -8,7 +8,7 @@ import PickedIndices from "./PickedIndices";
 import BreadthPie from "./Pie";
 import type { DashboardBreadth, DashboardPayload, WatchRow } from "@/lib/types";
 
-type CandleEvent = {
+type QuoteEvent = {
   instrument_token: number;
   candle: { close: number };
 };
@@ -37,9 +37,9 @@ export default function Desk() {
     }, 0);
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
     const source = new EventSource("/api/stream");
-    source.addEventListener("candle", (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as CandleEvent;
-      setData((current) => (current ? applyPrice(current, payload) : current));
+    source.addEventListener("quotes", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as QuoteEvent[];
+      setData((current) => (current ? applyPrices(current, payload) : current));
     });
     source.addEventListener("breakout", () => void load());
     source.addEventListener("status", (event) => {
@@ -182,18 +182,20 @@ function WatchLine({ row }: { row: WatchRow }) {
   );
 }
 
-function applyPrice(data: DashboardPayload, event: CandleEvent): DashboardPayload {
-  return {
-    ...data,
-    watching: data.watching.map((row) => {
-      if (row.instrument_token !== event.instrument_token) return row;
-      const last = event.candle.close;
-      return {
-        ...row,
-        last,
-        distHighPct: row.pdh == null || !last ? null : ((row.pdh - last) / last) * 100,
-        distLowPct: row.pdl == null || !last ? null : ((last - row.pdl) / last) * 100,
-      };
-    }),
-  };
+function applyPrices(data: DashboardPayload, events: QuoteEvent[]): DashboardPayload {
+  const prices = new Map(events.map((event) => [event.instrument_token, event.candle.close]));
+  if (prices.size === 0) return data;
+  let changed = false;
+  const watching = data.watching.map((row) => {
+    const last = prices.get(row.instrument_token);
+    if (last == null || last === row.last) return row;
+    changed = true;
+    return {
+      ...row,
+      last,
+      distHighPct: row.pdh == null || !last ? null : ((row.pdh - last) / last) * 100,
+      distLowPct: row.pdl == null || !last ? null : ((last - row.pdl) / last) * 100,
+    };
+  });
+  return changed ? { ...data, watching } : data;
 }

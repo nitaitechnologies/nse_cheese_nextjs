@@ -63,13 +63,16 @@ export default function ChartPanel({
     const sessionDate = payload?.date;
     if (!sessionDate || date) return;
     const source = new EventSource("/api/stream");
-    source.addEventListener("candle", (event) => {
-      const message = JSON.parse((event as MessageEvent).data) as {
+    source.addEventListener("quotes", (event) => {
+      const rows = JSON.parse((event as MessageEvent).data) as {
         instrument_token: number;
         date: string;
         candle: Candle;
-      };
-      if (String(message.instrument_token) !== token || message.date !== sessionDate) return;
+      }[];
+      const message = rows.find(
+        (row) => String(row.instrument_token) === token && row.date === sessionDate,
+      );
+      if (!message) return;
       setPayload((current) => {
         if (!current) return current;
         const candles = current.candles.filter((candle) => candle.time !== message.candle.time);

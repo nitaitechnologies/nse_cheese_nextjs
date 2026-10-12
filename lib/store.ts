@@ -193,7 +193,7 @@ export async function listPreviousRanges(
     const rows = await bars
       .aggregate<{ _id: number; high: number; low: number }>([
         { $match: { instrument_token: { $in: slice }, date: { $lt: beforeDate } } },
-        { $sort: { date: -1 } },
+        { $sort: { instrument_token: 1, date: -1 } },
         { $group: { _id: "$instrument_token", high: { $first: "$high" }, low: { $first: "$low" } } },
       ])
       .toArray();
@@ -1076,7 +1076,7 @@ async function previousCloses(tokens: number[], beforeDate: string): Promise<Map
     const rows = await bars
       .aggregate<{ _id: number; close: number }>([
         { $match: { instrument_token: { $in: slice }, date: { $lt: beforeDate } } },
-        { $sort: { date: -1 } },
+        { $sort: { instrument_token: 1, date: -1 } },
         { $group: { _id: "$instrument_token", close: { $first: "$close" } } },
       ])
       .toArray();
