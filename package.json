@@ -7,7 +7,7 @@
     "dev:worker": "node --env-file=.env node_modules/tsx/dist/cli.mjs watch worker/index.ts",
     "build": "next build",
     "build:worker": "tsc -p tsconfig.worker.json",
-    "start": "next start",
+    "start": "node scripts/start-production.mjs",
     "start:worker": "node --env-file=.env dist/worker/index.js",
     "hash-password": "tsx scripts/hash-password.ts",
     "test": "tsx --test lib/engine.test.ts lib/breadth.test.ts lib/nse-indices.test.ts lib/kite-origin.test.ts",
