@@ -59,6 +59,12 @@ export default function Probed() {
     );
   }
 
+  function markHidden(token: number, hidden: boolean) {
+    setStocks((current) =>
+      current.map((stock) => (stock.instrument_token === token ? { ...stock, hidden } : stock)),
+    );
+  }
+
   async function keep(token: number) {
     setError("");
     setBusy(true);
@@ -97,6 +103,24 @@ export default function Probed() {
     }
   }
 
+  async function hide(token: number, hidden: boolean) {
+    setError("");
+    setBusy(true);
+    markHidden(token, hidden);
+    try {
+      await api("/api/hides", {
+        method: hidden ? "POST" : "DELETE",
+        body: JSON.stringify({ instrument_token: token, date }),
+      });
+      await refresh();
+    } catch (err) {
+      markHidden(token, !hidden);
+      setError(err instanceof Error ? err.message : hidden ? "Could not hide the stock" : "Could not show the stock");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleIndex(symbol: string) {
     try {
       await toggle(symbol);
@@ -120,7 +144,8 @@ export default function Probed() {
       <h1 className="text-2xl font-semibold">Probed</h1>
       <p className="mt-1 text-sm text-muted">
         Stocks that closed a 5-minute candle through the previous day high or low, then closed back inside, and have
-        not closed through that level again. Check a name to store it. Saved names are on{" "}
+        not closed through that level again. Check a name to store it. Hide a name to leave it off All, High, and Low.
+        Hidden names and picked names clear on the first Kite login of the day. Saved names are on{" "}
         <Link href="/picks" className="text-gold">
           Picked
         </Link>
@@ -147,6 +172,7 @@ export default function Probed() {
               columns={2}
               headings={HEADINGS}
               mode="probe"
+              conceal
               render={(stock, side) => (
                 <BreakCard
                   stock={stock}
@@ -169,6 +195,16 @@ export default function Probed() {
                       }}
                     />
                     Keep
+                  </label>
+                  <label className="inline-flex min-h-11 items-center gap-2 px-3 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-5 accent-gold"
+                      checked={stock.hidden}
+                      disabled={busy}
+                      onChange={(event) => void hide(stock.instrument_token, event.target.checked)}
+                    />
+                    Hide
                   </label>
                   {pending === stock.instrument_token ? (
                     <div className="flex flex-wrap items-center gap-2">

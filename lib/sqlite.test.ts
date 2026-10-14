@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { closeDb, one, run } from "./sqlite";
+import { istTimestamp } from "./time";
 import {
   claimJob,
   claimNotice,
@@ -29,7 +30,13 @@ import {
   createIndex,
   dashboardBreadth,
   deleteIndex,
+  listPieHistory,
+  addPick,
+  hideStock,
+  listPicks,
+  listStockBoard,
   removeDeskPie,
+  unhideStock,
 } from "./store";
 
 const dir = mkdtempSync(path.join(tmpdir(), "nse-sqlite-"));
@@ -220,14 +227,20 @@ test("pinned indices become extra desk pies", async () => {
   await createIndex("NIFTY 50", "Nifty 50");
   try {
     assert.equal(await addDeskPie("nifty it"), "NIFTY IT");
-    await assert.rejects(() => addDeskPie("NIFTY 50"), /already on the desk/);
+    assert.equal(await addDeskPie("NIFTY 50"), "NIFTY 50");
     const breadth = await dashboardBreadth("2026-10-14");
-    assert.equal(breadth.extras.length, 1);
-    assert.equal(breadth.extras[0]?.symbol, "NIFTY IT");
-    assert.equal(breadth.extras[0]?.label, "Nifty IT");
+    assert.deepEqual(
+      breadth.extras.map((item) => item.symbol),
+      ["NIFTY IT", "NIFTY 50"],
+    );
     assert.equal(breadth.nifty50.missing, false);
     assert.equal(breadth.nifty50.symbol, "NIFTY 50");
     await removeDeskPie("NIFTY IT");
+    assert.deepEqual(
+      (await dashboardBreadth("2026-10-14")).extras.map((item) => item.symbol),
+      ["NIFTY 50"],
+    );
+    await removeDeskPie("NIFTY 50");
     assert.equal((await dashboardBreadth("2026-10-14")).extras.length, 0);
   } finally {
     await removeDeskPie("NIFTY IT");
@@ -239,6 +252,153 @@ test("pinned indices become extra desk pies", async () => {
         // The index was already removed.
       }
     }
+  }
+});
+
+test("a hide stays on that session date only", async () => {
+  run(
+    `INSERT INTO stocks (instrument_token, tradingsymbol, name, added_at) VALUES (?, ?, ?, ?)`,
+    [4242, "HIDE", "Hide Me", new Date().toISOString()],
+  );
+  try {
+    await hideStock(4242, "2026-10-14");
+    const hidden = await listStockBoard("2026-10-14");
+    const prior = await listStockBoard("2026-10-13");
+    assert.equal(hidden.find((row) => row.instrument_token === 4242)?.hidden, true);
+    assert.equal(prior.find((row) => row.instrument_token === 4242)?.hidden, false);
+    await unhideStock(4242, "2026-10-14");
+    const shown = await listStockBoard("2026-10-14");
+    assert.equal(shown.find((row) => row.instrument_token === 4242)?.hidden, false);
+  } finally {
+    run("DELETE FROM hides WHERE instrument_token = ?", [4242]);
+    run("DELETE FROM stocks WHERE instrument_token = ?", [4242]);
+  }
+});
+
+test("the first kite login of the day clears picks and hides", async () => {
+  run(
+    `INSERT INTO stocks (instrument_token, tradingsymbol, name, added_at) VALUES (?, ?, ?, ?)`,
+    [4243, "MORN", "Morning", new Date().toISOString()],
+  );
+  try {
+    await addPick(4243);
+    await hideStock(4243, "2026-10-14");
+    await saveKiteSession({
+      accessToken: "morning",
+      userId: "u",
+      userName: "n",
+      loginTime: new Date("2026-10-18T03:30:00.000Z"),
+    });
+    assert.equal(
+      (await listPicks()).some((pick) => pick.instrument_token === 4243),
+      false,
+    );
+    assert.equal(one("SELECT 1 AS found FROM hides WHERE instrument_token = ?", [4243]), undefined);
+
+    await addPick(4243);
+    await hideStock(4243, "2026-10-18");
+    await saveKiteSession({
+      accessToken: "later",
+      userId: "u",
+      userName: "n",
+      loginTime: new Date("2026-10-18T05:00:00.000Z"),
+    });
+    assert.equal(
+      (await listPicks()).some((pick) => pick.instrument_token === 4243),
+      true,
+    );
+    assert.equal(
+      one("SELECT instrument_token AS token FROM hides WHERE instrument_token = ?", [4243])?.token,
+      4243,
+    );
+  } finally {
+    run("DELETE FROM picks WHERE instrument_token = ?", [4243]);
+    run("DELETE FROM hides WHERE instrument_token = ?", [4243]);
+    run("DELETE FROM stocks WHERE instrument_token = ?", [4243]);
+    run("DELETE FROM kite_sessions WHERE access_token IN ('morning', 'later')");
+  }
+});
+
+test("pie replay walks 5-minute breadth from the open", async () => {
+  await createIndex("PIE TEST", "Pie Test");
+  run("UPDATE indices SET instrument_token = ? WHERE symbol = ?", [801, "PIE TEST"]);
+  run(
+    `INSERT INTO index_members (symbol, instrument_token, tradingsymbol, name)
+     VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+    ["PIE TEST", 901, "AAA", "Aaa", "PIE TEST", 902, "BBB", "Bbb"],
+  );
+  try {
+    await upsertDailyBars([
+      { instrument_token: 901, tradingsymbol: "AAA", date: "2026-10-13", open: 100, high: 100, low: 100, close: 100, volume: 1 },
+      { instrument_token: 902, tradingsymbol: "BBB", date: "2026-10-13", open: 50, high: 50, low: 50, close: 50, volume: 1 },
+      { instrument_token: 801, tradingsymbol: "PIE", date: "2026-10-13", open: 1000, high: 1000, low: 1000, close: 1000, volume: 1 },
+    ]);
+    await saveDayCandles({
+      instrument_token: 901,
+      tradingsymbol: "AAA",
+      date: "2026-10-14",
+      candles: [
+        { time: "09:15", ts: istTimestamp("2026-10-14", "09:15"), open: 110, high: 110, low: 110, close: 110, volume: 1 },
+        { time: "09:20", ts: istTimestamp("2026-10-14", "09:20"), open: 90, high: 90, low: 90, close: 90, volume: 1 },
+      ],
+    });
+    await saveDayCandles({
+      instrument_token: 902,
+      tradingsymbol: "BBB",
+      date: "2026-10-14",
+      candles: [
+        { time: "09:20", ts: istTimestamp("2026-10-14", "09:20"), open: 50, high: 50, low: 50, close: 50, volume: 1 },
+      ],
+    });
+    await saveDayCandles({
+      instrument_token: 801,
+      tradingsymbol: "PIE",
+      date: "2026-10-14",
+      candles: [
+        { time: "09:15", ts: istTimestamp("2026-10-14", "09:15"), open: 1010, high: 1010, low: 1010, close: 1010, volume: 1 },
+        { time: "09:20", ts: istTimestamp("2026-10-14", "09:20"), open: 1005, high: 1005, low: 1005, close: 1005, volume: 1 },
+      ],
+    });
+    await upsertQuotes([
+      {
+        instrument_token: 901,
+        tradingsymbol: "AAA",
+        last_price: 70,
+        prev_close: 100,
+        forming: null,
+        date: "2026-10-14",
+        updatedAt: new Date("2026-10-14T03:52:00.000Z"),
+      },
+      {
+        instrument_token: 801,
+        tradingsymbol: "PIE",
+        last_price: 990,
+        prev_close: 1000,
+        forming: null,
+        date: "2026-10-14",
+        updatedAt: new Date("2026-10-14T03:52:00.000Z"),
+      },
+    ]);
+    const [pie] = await listPieHistory("2026-10-14", "PIE TEST", new Date(istTimestamp("2026-10-14", "09:22") * 1000));
+    assert.equal(pie?.label, "Pie Test");
+    assert.equal(pie?.frames.length, 2);
+    assert.equal(pie?.frames[0]?.time, "09:15");
+    assert.equal(pie?.frames[0]?.advance, 1);
+    assert.equal(pie?.frames[0]?.unpriced, 1);
+    assert.equal(pie?.frames[0]?.last, 1010);
+    assert.equal(pie?.frames[1]?.decline, 1);
+    assert.equal(pie?.frames[1]?.unchanged, 1);
+    assert.equal(pie?.frames[1]?.last, 990);
+    assert.equal(pie?.frames[1]?.change, -10);
+  } finally {
+    try {
+      await deleteIndex("PIE TEST");
+    } catch {
+      // The index was already removed.
+    }
+    run("DELETE FROM candles_5m WHERE instrument_token IN (801, 901, 902)");
+    run("DELETE FROM daily_bars WHERE instrument_token IN (801, 901, 902)");
+    run("DELETE FROM quotes WHERE instrument_token IN (801, 901, 902)");
   }
 });
 

@@ -1,18 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dated } from "./api";
 import { useSessionDate } from "./SessionDate";
-import { levelText, money, tickAge } from "./format";
+import { tickAge } from "./format";
 import DeskBreadth from "./DeskBreadth";
 import PickedIndices from "./PickedIndices";
-import type { DashboardBreadth, DashboardPayload, WatchRow } from "@/lib/types";
-
-type QuoteEvent = {
-  instrument_token: number;
-  candle: { close: number };
-};
+import type { DashboardBreadth, DashboardPayload } from "@/lib/types";
 
 export default function Desk() {
   const { date, live, ready } = useSessionDate();
@@ -50,10 +44,6 @@ export default function Desk() {
     let breadthTimer: number | undefined;
     if (live) {
       source = new EventSource("/api/stream");
-      source.addEventListener("quotes", (event) => {
-        const payload = JSON.parse((event as MessageEvent).data) as QuoteEvent[];
-        setData((current) => (current ? applyPrices(current, payload) : current));
-      });
       source.addEventListener("breakout", () => void load());
       source.addEventListener("status", (event) => {
         const status = JSON.parse((event as MessageEvent).data) as DashboardPayload["worker"];
@@ -87,7 +77,6 @@ export default function Desk() {
     );
   }
 
-  const quiet = data.watching.filter((row) => !row.signal);
   return (
     <main className="px-4 pt-[max(1rem,env(safe-area-inset-top))]">
       <header className="flex items-end justify-between gap-3">
@@ -101,20 +90,6 @@ export default function Desk() {
       {error ? <p className="mt-3 text-sm text-down">{error}</p> : null}
       <DeskBreadth breadth={breadth ?? data.breadth} date={date} onBreadth={setBreadth} />
       <PickedIndices />
-      <section className="mt-6">
-        <h2 className="text-sm font-medium text-muted">Still inside the range</h2>
-        {data.watching.length === 0 ? (
-          <p className="mt-3 text-sm text-muted">No stocks in the book yet. Refresh them from Setup.</p>
-        ) : quiet.length === 0 ? (
-          <p className="mt-3 text-sm text-muted">Every watched name has already broken.</p>
-        ) : (
-          <div className="mt-3 flex flex-col gap-2">
-            {quiet.map((row) => (
-              <WatchLine key={row.instrument_token} row={row} />
-            ))}
-          </div>
-        )}
-      </section>
     </main>
   );
 }
@@ -136,37 +111,3 @@ function Status({ data, now }: { data: DashboardPayload; now: number }) {
   );
 }
 
-function WatchLine({ row }: { row: WatchRow }) {
-  return (
-    <Link
-      href={`/chart/${row.instrument_token}`}
-      className="flex min-h-14 items-center justify-between gap-3 rounded-2xl border border-line px-4 py-3 active:bg-panel"
-    >
-      <div>
-        <p className="font-medium">{row.tradingsymbol}</p>
-        <p className="text-xs text-muted">
-          {levelText("high", row.distHighPct)} · {levelText("low", row.distLowPct)}
-        </p>
-      </div>
-      <p className="font-mono text-sm">{money(row.last)}</p>
-    </Link>
-  );
-}
-
-function applyPrices(data: DashboardPayload, events: QuoteEvent[]): DashboardPayload {
-  const prices = new Map(events.map((event) => [event.instrument_token, event.candle.close]));
-  if (prices.size === 0) return data;
-  let changed = false;
-  const watching = data.watching.map((row) => {
-    const last = prices.get(row.instrument_token);
-    if (last == null || last === row.last) return row;
-    changed = true;
-    return {
-      ...row,
-      last,
-      distHighPct: row.pdh == null || !last ? null : ((row.pdh - last) / last) * 100,
-      distLowPct: row.pdl == null || !last ? null : ((last - row.pdl) / last) * 100,
-    };
-  });
-  return changed ? { ...data, watching } : data;
-}

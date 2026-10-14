@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { latestSideEvent } from "@/lib/signals";
 import type { BreakPickRow, Side } from "@/lib/types";
 
-type Tab = "all" | Side;
+type Tab = "all" | Side | "hidden";
 type Mode = "any" | "break" | "probe";
 
 function breakTime(stock: BreakPickRow, side: Side): number {
@@ -81,6 +81,7 @@ export default function BreakGroups({
   headings = DEFAULT_HEADINGS,
   mode = "any",
   minStrength = 1,
+  conceal = false,
 }: {
   stocks: BreakPickRow[];
   render: (stock: BreakPickRow, side: Side) => ReactNode;
@@ -89,19 +90,33 @@ export default function BreakGroups({
   headings?: typeof DEFAULT_HEADINGS;
   mode?: Mode;
   minStrength?: number;
+  conceal?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("all");
-  const high = sideStocks(stocks, "PDH", mode, minStrength);
-  const low = sideStocks(stocks, "PDL", mode, minStrength);
+  const viewingHidden = conceal && tab === "hidden";
+  const open = conceal ? stocks.filter((stock) => !stock.hidden) : stocks;
+  const concealed = conceal ? stocks.filter((stock) => stock.hidden) : [];
+  const pool = viewingHidden ? concealed : open;
+  const strength = viewingHidden ? 1 : minStrength;
+  const high = sideStocks(pool, "PDH", mode, strength);
+  const low = sideStocks(pool, "PDL", mode, strength);
+  const openHigh = sideStocks(open, "PDH", mode, minStrength);
+  const openLow = sideStocks(open, "PDL", mode, minStrength);
+  const hiddenCount =
+    sideStocks(concealed, "PDH", mode, 1).length + sideStocks(concealed, "PDL", mode, 1).length;
   const counts: Record<Tab, number> = {
-    all: high.length + low.length,
-    PDH: high.length,
-    PDL: low.length,
+    all: openHigh.length + openLow.length,
+    PDH: openHigh.length,
+    PDL: openLow.length,
+    hidden: hiddenCount,
   };
+  const tabs = conceal ? [...TABS, { id: "hidden" as const, label: "Hidden" }] : TABS;
+  const showHigh = tab !== "PDL";
+  const showLow = tab !== "PDH";
   return (
     <>
       <div className="flex gap-2 overflow-x-auto">
-        {TABS.map((item) => (
+        {tabs.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -115,26 +130,32 @@ export default function BreakGroups({
           </button>
         ))}
       </div>
-      {tab !== "PDL" ? (
+      {viewingHidden && high.length === 0 && low.length === 0 ? (
+        <p className="text-sm text-muted">No hidden stocks.</p>
+      ) : (
         <>
-          <Heading label={headings.high} count={high.length} tone="text-up" />
-          {high.length === 0 ? (
-            <p className="text-sm text-muted">{headings.emptyHigh}</p>
-          ) : (
-            <Cards stocks={high} side="PDH" columns={columns} render={render} />
-          )}
+          {showHigh ? (
+            <>
+              <Heading label={headings.high} count={high.length} tone="text-up" />
+              {high.length === 0 ? (
+                <p className="text-sm text-muted">{headings.emptyHigh}</p>
+              ) : (
+                <Cards stocks={high} side="PDH" columns={columns} render={render} />
+              )}
+            </>
+          ) : null}
+          {showLow ? (
+            <>
+              <Heading label={headings.low} count={low.length} tone="text-down" />
+              {low.length === 0 ? (
+                <p className="text-sm text-muted">{headings.emptyLow}</p>
+              ) : (
+                <Cards stocks={low} side="PDL" columns={columns} render={render} />
+              )}
+            </>
+          ) : null}
         </>
-      ) : null}
-      {tab !== "PDH" ? (
-        <>
-          <Heading label={headings.low} count={low.length} tone="text-down" />
-          {low.length === 0 ? (
-            <p className="text-sm text-muted">{headings.emptyLow}</p>
-          ) : (
-            <Cards stocks={low} side="PDL" columns={columns} render={render} />
-          )}
-        </>
-      ) : null}
+      )}
       {tab === "all" ? extra : null}
     </>
   );

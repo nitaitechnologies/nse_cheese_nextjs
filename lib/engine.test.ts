@@ -7,6 +7,7 @@ import {
   bucketFromDate,
   chartUnix,
   istTimestamp,
+  sessionBuckets,
   weekdayDates,
 } from "./time";
 import type { Candle } from "./types";
@@ -45,6 +46,18 @@ describe("IST session clock", () => {
     assert.equal(bucketFromDate(new Date(istTimestamp("2026-10-12", "09:20") * 1000))?.time, "09:20");
     assert.equal(bucketFromDate(new Date(istTimestamp("2026-10-12", "15:29") * 1000))?.time, "15:25");
     assert.equal(bucketFromDate(new Date(istTimestamp("2026-10-12", "15:30") * 1000)), null);
+    const open = new Date(istTimestamp("2026-10-14", "09:14") * 1000);
+    assert.deepEqual(sessionBuckets("2026-10-14", open), []);
+    const mid = new Date(istTimestamp("2026-10-14", "11:00") * 1000);
+    const untilEleven = sessionBuckets("2026-10-14", mid);
+    assert.equal(untilEleven[0], "09:15");
+    assert.equal(untilEleven.at(-1), "11:00");
+    assert.equal(untilEleven.length, 22);
+    const later = new Date(istTimestamp("2026-10-15", "10:00") * 1000);
+    const full = sessionBuckets("2026-10-14", later);
+    assert.equal(full[0], "09:15");
+    assert.equal(full.at(-1), "15:25");
+    assert.equal(full.length, 75);
   });
 
   it("lists weekdays and steps across months", () => {

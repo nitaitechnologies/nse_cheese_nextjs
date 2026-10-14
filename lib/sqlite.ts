@@ -135,6 +135,13 @@ CREATE TABLE IF NOT EXISTS picks (
   name TEXT NOT NULL,
   picked_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS hides (
+  instrument_token INTEGER NOT NULL,
+  date TEXT NOT NULL,
+  hidden_at TEXT NOT NULL,
+  PRIMARY KEY (instrument_token, date)
+);
+CREATE INDEX IF NOT EXISTS hides_date ON hides (date);
 CREATE TABLE IF NOT EXISTS pie_picks (
   symbol TEXT PRIMARY KEY,
   added_at TEXT NOT NULL

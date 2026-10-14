@@ -115,7 +115,7 @@ export default function Picks() {
             <Link href="/stocks" className="text-gold">
               Stocks
             </Link>
-            . Reset clears every check.
+            . Reset clears every check. The list also clears on the first Kite login of the day.
           </p>
         </div>
         {loaded && stocks.length > 0 && !confirmReset ? (

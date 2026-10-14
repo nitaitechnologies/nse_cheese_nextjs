@@ -64,6 +64,24 @@ export function bucketFromDate(date: Date): { date: string; time: string } | nul
   return { date: istDateString(date), time };
 }
 
+/** 5-minute session marks from 09:15 through the last closed-or-current bucket. */
+export function sessionBuckets(dateKey: string, now = new Date()): string[] {
+  const today = istDateString(now);
+  if (dateKey > today) return [];
+  let end = CLOSE_MIN - 5;
+  if (dateKey === today) {
+    const [hour, minute] = istTimeHM(now).split(":").map(Number);
+    const mins = hour * 60 + minute;
+    if (mins < OPEN_MIN) return [];
+    if (mins < CLOSE_MIN) end = OPEN_MIN + Math.floor((mins - OPEN_MIN) / 5) * 5;
+  }
+  const times: string[] = [];
+  for (let cursor = OPEN_MIN; cursor <= end; cursor += 5) {
+    times.push(`${pad2(Math.floor(cursor / 60))}:${pad2(cursor % 60)}`);
+  }
+  return times;
+}
+
 export function istTimestamp(dateStr: string, time: string): number {
   const [year, month, day] = dateStr.split("-").map(Number);
   const [hour, minute] = time.split(":").map(Number);

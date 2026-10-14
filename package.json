@@ -14,7 +14,7 @@
     "start:worker": "node --env-file=.env dist/worker/index.js",
     "hash-password": "tsx scripts/hash-password.ts",
     "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1",
-    "test": "tsx --test lib/engine.test.ts lib/breadth.test.ts lib/nse-indices.test.ts lib/kite-origin.test.ts lib/sqlite.test.ts",
+    "test": "tsx --test lib/engine.test.ts lib/breadth.test.ts lib/pie-history.test.ts lib/nse-indices.test.ts lib/kite-origin.test.ts lib/sqlite.test.ts",
     "lint": "eslint"
   },
   "dependencies": {

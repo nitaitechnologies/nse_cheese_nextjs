@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { breadthSlot } from "@/lib/breadth";
 import type { DashboardBreadth, IndexCard, IndexRow } from "@/lib/types";
 import { api, dated } from "./api";
 import BreadthPie from "./Pie";
+import PieReplayModal from "./PieReplay";
 
 export default function DeskBreadth({
   breadth,
@@ -20,6 +20,7 @@ export default function DeskBreadth({
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [replay, setReplay] = useState<null | "all" | string>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -37,17 +38,15 @@ export default function DeskBreadth({
   }, [open, date]);
 
   const shown = new Set(
-    [breadth.nifty50.symbol, breadth.banknifty.symbol, ...(breadth.extras ?? []).map((item) => item.symbol)].filter(
-      (symbol): symbol is string => Boolean(symbol),
-    ),
+    (breadth.extras ?? []).map((item) => item.symbol).filter((symbol): symbol is string => Boolean(symbol)),
   );
   const needle = query.trim().toLowerCase();
   const choices = (indices ?? []).filter((index) => {
-    if (shown.has(index.symbol) || breadthSlot(index.symbol)) return false;
+    if (shown.has(index.symbol)) return false;
     if (!needle) return true;
     return index.symbol.toLowerCase().includes(needle) || index.name.toLowerCase().includes(needle);
   });
-  const cards: IndexCard[] = [breadth.market, breadth.nifty50, breadth.banknifty, ...(breadth.extras ?? [])];
+  const cards: IndexCard[] = [breadth.market, ...(breadth.extras ?? [])];
 
   async function refresh() {
     onBreadth(await api<DashboardBreadth>(dated("/api/breadth", date)));
@@ -84,7 +83,16 @@ export default function DeskBreadth({
 
   return (
     <section className="mt-6">
-      <h2 className="text-sm font-medium text-muted">Advance / decline</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium text-muted">Indices Strength</h2>
+        <button
+          type="button"
+          className="min-h-9 rounded-lg border border-line px-3 text-xs font-medium text-gold"
+          onClick={() => setReplay("all")}
+        >
+          Replay all
+        </button>
+      </div>
       {error ? <p className="mt-3 text-sm text-down">{error}</p> : null}
       {open ? (
         <div className="mt-3 rounded-2xl border border-line bg-panel p-3">
@@ -129,11 +137,12 @@ export default function DeskBreadth({
       ) : null}
       <div className="mt-3 grid grid-cols-4 items-stretch gap-3 [&_article]:min-w-0 [&_article]:w-full [&_article]:flex-none">
         {cards.map((card) => {
-          const removable = Boolean(card.symbol) && !breadthSlot(card.symbol ?? "");
+          const removable = Boolean(card.symbol);
           return (
             <BreadthPie
               key={card.symbol ?? card.label}
               breadth={card}
+              onReplay={() => setReplay(card.symbol ?? "market")}
               onRemove={removable && card.symbol ? () => void remove(card.symbol as string) : undefined}
             />
           );
@@ -149,6 +158,9 @@ export default function DeskBreadth({
           {open ? "Close" : "Add index"}
         </button>
       </div>
+      {replay != null ? (
+        <PieReplayModal date={date} symbol={replay === "all" ? null : replay} onClose={() => setReplay(null)} />
+      ) : null}
     </section>
   );
 }

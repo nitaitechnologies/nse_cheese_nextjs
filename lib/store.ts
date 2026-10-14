@@ -1,8 +1,9 @@
-import { breadthSlot, classifyMove, isIndexSymbol, normalizeIndexSymbol, pickIndex, priceChange, tally } from "./breadth";
+import { classifyMove, isIndexSymbol, normalizeIndexSymbol, pickIndex, priceChange, tally } from "./breadth";
+import { buildPieFrames, type PieLive, type PieTrack } from "./pie-history";
 import { detectTimeline, hasLiveSide, latestSideEvent } from "./signals";
 import { clampBackfillDays, dailyRetentionCutoff, RETENTION_DAYS, retentionCutoff } from "./retention";
 import { all, duplicateKey, fillKeptTokens, getDb, one, readyDb, run, transaction, type Row } from "./sqlite";
-import { istDateString } from "./time";
+import { bucketFromDate, istDateString, sessionBuckets } from "./time";
 import type {
   BreakEvent,
   BreakPickRow,
@@ -17,6 +18,7 @@ import type {
   IndexDoc,
   IndexMemberDoc,
   IndexRow,
+  PieReplay,
   InstrumentDoc,
   JobDoc,
   JobType,
@@ -261,6 +263,7 @@ export async function pruneExpiredData(now = new Date()): Promise<{ removed: num
       ),
       run("DELETE FROM notices WHERE substr(created_at, 1, 10) < ?", [cutoff]),
       run("DELETE FROM kite_sessions WHERE login_date < ?", [cutoff]),
+      run("DELETE FROM hides WHERE date < ?", [cutoff]),
     ];
     return deleted.reduce((sum, result) => sum + result.changes, 0);
   });
@@ -274,17 +277,19 @@ export async function saveKiteSession(input: {
   loginTime: Date;
 }): Promise<void> {
   await readyDb();
-  run(
-    `INSERT INTO kite_sessions (access_token, user_id, user_name, login_time, login_date)
-     VALUES (?, ?, ?, ?, ?)`,
-    [
-      input.accessToken,
-      input.userId,
-      input.userName,
-      input.loginTime.toISOString(),
-      istDateString(input.loginTime),
-    ],
-  );
+  const loginDate = istDateString(input.loginTime);
+  transaction(() => {
+    const firstToday = !one("SELECT 1 AS found FROM kite_sessions WHERE login_date = ?", [loginDate]);
+    if (firstToday) {
+      getDb().exec("DELETE FROM picks");
+      getDb().exec("DELETE FROM hides");
+    }
+    run(
+      `INSERT INTO kite_sessions (access_token, user_id, user_name, login_time, login_date)
+       VALUES (?, ?, ?, ?, ?)`,
+      [input.accessToken, input.userId, input.userName, input.loginTime.toISOString(), loginDate],
+    );
+  });
 }
 
 export async function getKiteSession(date = istDateString(new Date())): Promise<KiteSessionDoc | null> {
@@ -887,7 +892,7 @@ export async function replaceIndexMemberships(
 }
 
 function dropOutside(tokens: number[]): void {
-  for (const table of ["quotes", "candles_5m", "daily_bars", "signals", "coverage", "picks"]) {
+  for (const table of ["quotes", "candles_5m", "daily_bars", "signals", "coverage", "picks", "hides"]) {
     deleteExcept(table, tokens);
   }
 }
@@ -1016,8 +1021,37 @@ function withStoredStrength(events: BreakEvent[], signals: SignalDoc[]): BreakEv
   });
 }
 
+async function hiddenTokens(dateKey: string): Promise<Set<number>> {
+  await readyDb();
+  return new Set(
+    all("SELECT instrument_token FROM hides WHERE date = ?", [dateKey]).map((row) => num(row, "instrument_token")),
+  );
+}
+
+export async function hideStock(token: number, dateKey: string): Promise<void> {
+  await readyDb();
+  const stock = one("SELECT 1 AS found FROM stocks WHERE instrument_token = ?", [token]);
+  if (!stock) throw new Error("Stock is not in the book");
+  run(
+    `INSERT INTO hides (instrument_token, date, hidden_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(instrument_token, date) DO NOTHING`,
+    [token, dateKey, new Date().toISOString()],
+  );
+}
+
+export async function unhideStock(token: number, dateKey: string): Promise<void> {
+  await readyDb();
+  run("DELETE FROM hides WHERE instrument_token = ? AND date = ?", [token, dateKey]);
+}
+
 export async function listStockBoard(dateKey: string): Promise<StockBoardRow[]> {
-  const [rows, signals, picks] = await Promise.all([listStocks(), listSignals(dateKey), listPicks()]);
+  const [rows, signals, picks, hidden] = await Promise.all([
+    listStocks(),
+    listSignals(dateKey),
+    listPicks(),
+    hiddenTokens(dateKey),
+  ]);
   const tokens = rows.map((row) => row.instrument_token);
   const [prices, ranges, sessions] = await Promise.all([
     boardPrices(tokens, dateKey),
@@ -1054,6 +1088,7 @@ export async function listStockBoard(dateKey: string): Promise<StockBoardRow[]> 
       prevClose: price.prevClose,
       ...priceChange(price.last, price.prevClose),
       picked: picked.has(row.instrument_token),
+      hidden: hidden.has(row.instrument_token),
       events,
     };
   });
@@ -1134,7 +1169,6 @@ export async function addDeskPie(symbolInput: string): Promise<string> {
   const index = one("SELECT symbol FROM indices WHERE symbol = ?", [symbol]);
   if (!index) throw new Error("Index not found");
   const saved = text(index, "symbol");
-  if (breadthSlot(saved)) throw new Error("That index is already on the desk");
   run("INSERT INTO desk_pies (symbol, added_at) VALUES (?, ?) ON CONFLICT(symbol) DO NOTHING", [
     saved,
     new Date().toISOString(),
@@ -1175,8 +1209,8 @@ export async function listDeskCounts(dateKey: string): Promise<DeskCounts> {
   const board = await listStockBoard(dateKey);
   const indexRow = one("SELECT COUNT(*) AS n FROM indices");
   return {
-    breaks: board.filter((row) => hasLiveSide(row.events, "break")).length,
-    probes: board.filter((row) => hasLiveSide(row.events, "probe")).length,
+    breaks: board.filter((row) => !row.hidden && hasLiveSide(row.events, "break")).length,
+    probes: board.filter((row) => !row.hidden && hasLiveSide(row.events, "probe")).length,
     picks: board.filter((row) => row.picked).length,
     stocks: board.length,
     indices: indexRow ? num(indexRow, "n") : 0,
@@ -1203,6 +1237,7 @@ function storedPickRow(pick: PickDoc): StockBoardRow {
     change: null,
     changePct: null,
     picked: true,
+    hidden: false,
     events: [],
   };
 }
@@ -1291,6 +1326,16 @@ export async function replaceStockInstrument(token: number, nextToken: number): 
         ]);
       }
     }
+    const hiddenRows = all("SELECT date, hidden_at FROM hides WHERE instrument_token = ?", [token]);
+    run("DELETE FROM hides WHERE instrument_token = ?", [token]);
+    for (const hidden of hiddenRows) {
+      run(
+        `INSERT INTO hides (instrument_token, date, hidden_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(instrument_token, date) DO NOTHING`,
+        [nextToken, text(hidden, "date"), text(hidden, "hidden_at")],
+      );
+    }
   });
   const rows = await listStocks();
   const row = rows.find((item) => item.instrument_token === nextToken);
@@ -1304,6 +1349,7 @@ export async function removeStock(token: number): Promise<void> {
     const result = run("DELETE FROM stocks WHERE instrument_token = ?", [token]);
     run("DELETE FROM index_members WHERE instrument_token = ?", [token]);
     run("DELETE FROM picks WHERE instrument_token = ?", [token]);
+    run("DELETE FROM hides WHERE instrument_token = ?", [token]);
     if (result.changes === 0) throw new Error("Stock is not in the book");
   });
 }
@@ -1432,8 +1478,7 @@ export async function dashboardBreadth(dateKey: string): Promise<DashboardBreadt
   const bySymbol = new Map(indexRows.map((row) => [row.symbol, row]));
   const extras = (await listDeskPies())
     .map((symbol) => bySymbol.get(symbol))
-    .filter((row): row is IndexDoc => Boolean(row))
-    .filter((row) => row.symbol !== nifty?.symbol && row.symbol !== bank?.symbol);
+    .filter((row): row is IndexDoc => Boolean(row));
   const tracked = [nifty, bank, ...extras].filter((row): row is IndexDoc => Boolean(row));
   const symbols = [...new Set(tracked.map((row) => row.symbol))];
   const memberRows =
@@ -1476,6 +1521,70 @@ export async function dashboardBreadth(dateKey: string): Promise<DashboardBreadt
     banknifty: bank ? card(bank) : { label: "Bank Nifty", symbol: null, missing: true, ...empty, ...blank },
     extras: extras.map(card),
   };
+}
+
+function marketTrack(): PieTrack {
+  return {
+    label: "Market",
+    symbol: null,
+    tokens: all("SELECT instrument_token FROM stocks").map((row) => num(row, "instrument_token")),
+    quoteToken: null,
+  };
+}
+
+function indexTrack(symbolInput: string): PieTrack | null {
+  const symbol = normalizeIndexSymbol(symbolInput);
+  const row = one("SELECT * FROM indices WHERE symbol = ?", [symbol]);
+  if (!row) return null;
+  const doc = indexDoc(row);
+  const members = all("SELECT instrument_token FROM index_members WHERE symbol = ?", [doc.symbol]);
+  return {
+    label: doc.name,
+    symbol: doc.symbol,
+    tokens: members.map((item) => num(item, "instrument_token")),
+    quoteToken: doc.instrument_token ?? null,
+  };
+}
+
+export async function listPieHistory(dateKey: string, symbol: string | null, now = new Date()): Promise<PieReplay[]> {
+  await readyDb();
+  const tracks: PieTrack[] = [];
+  const wanted = symbol?.trim() ?? "";
+  if (!wanted) {
+    tracks.push(marketTrack());
+    for (const item of await listDeskPies()) {
+      const track = indexTrack(item);
+      if (track) tracks.push(track);
+    }
+  } else if (wanted.toLowerCase() === "market") {
+    tracks.push(marketTrack());
+  } else {
+    const track = indexTrack(wanted);
+    if (!track) throw new Error("Index not found");
+    tracks.push(track);
+  }
+  const tokens = [
+    ...new Set(
+      tracks.flatMap((track) => (track.quoteToken == null ? track.tokens : [...track.tokens, track.quoteToken])),
+    ),
+  ];
+  const times = sessionBuckets(dateKey, now);
+  const [previous, candles] = await Promise.all([previousCloses(tokens, dateKey), listDayCandles(tokens, dateKey)]);
+  const bucket = dateKey === istDateString(now) ? bucketFromDate(now) : null;
+  let live: PieLive | null = null;
+  if (bucket) {
+    const quotes = await listQuotes(tokens);
+    const prices = new Map<number, number>();
+    for (const quote of quotes) {
+      if (quote.date === dateKey && Number.isFinite(quote.last_price)) prices.set(quote.instrument_token, quote.last_price);
+    }
+    live = { time: bucket.time, prices };
+  }
+  return tracks.map((track) => ({
+    label: track.label,
+    symbol: track.symbol,
+    frames: buildPieFrames({ times, track, previous, candles, live }),
+  }));
 }
 
 export async function indexCardsForInstrument(token: number, dateKey: string): Promise<IndexCard[]> {

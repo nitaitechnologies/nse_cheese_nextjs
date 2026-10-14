@@ -189,6 +189,7 @@ export type StockBoardRow = StockRow & {
   change: number | null;
   changePct: number | null;
   picked: boolean;
+  hidden: boolean;
   events: BreakEvent[];
 };
 
@@ -239,6 +240,25 @@ export type DashboardBreadth = {
   nifty50: IndexCard;
   banknifty: IndexCard;
   extras: IndexCard[];
+};
+
+export type PieFrame = {
+  time: string;
+  advance: number;
+  decline: number;
+  unchanged: number;
+  unpriced: number;
+  total: number;
+  last: number | null;
+  prevClose: number | null;
+  change: number | null;
+  changePct: number | null;
+};
+
+export type PieReplay = {
+  label: string;
+  symbol: string | null;
+  frames: PieFrame[];
 };
 
 export type WatchRow = {

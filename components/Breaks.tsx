@@ -73,6 +73,12 @@ export default function Breaks() {
     );
   }
 
+  function markHidden(token: number, hidden: boolean) {
+    setStocks((current) =>
+      current.map((stock) => (stock.instrument_token === token ? { ...stock, hidden } : stock)),
+    );
+  }
+
   async function keep(token: number) {
     setError("");
     setBusy(true);
@@ -111,6 +117,24 @@ export default function Breaks() {
     }
   }
 
+  async function hide(token: number, hidden: boolean) {
+    setError("");
+    setBusy(true);
+    markHidden(token, hidden);
+    try {
+      await api("/api/hides", {
+        method: hidden ? "POST" : "DELETE",
+        body: JSON.stringify({ instrument_token: token, date }),
+      });
+      await refresh();
+    } catch (err) {
+      markHidden(token, !hidden);
+      setError(err instanceof Error ? err.message : hidden ? "Could not hide the stock" : "Could not show the stock");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleIndex(symbol: string) {
     try {
       await toggle(symbol);
@@ -127,17 +151,19 @@ export default function Breaks() {
       return latest?.kind === "break" && latest.strength >= min;
     });
   }
+  const listed = searched.filter((stock) => !stock.hidden);
   const strengthCounts = STRENGTHS.map(
-    (min) => searched.reduce((total, stock) => total + liveBreaks(stock, min).length, 0),
+    (min) => listed.reduce((total, stock) => total + liveBreaks(stock, min).length, 0),
   );
-  const visible = searched.filter((stock) => liveBreaks(stock, minStrength).length > 0);
+  const visible = searched.filter((stock) => stock.hidden || liveBreaks(stock, minStrength).length > 0);
 
   return (
     <main className="px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-8">
       <h1 className="text-2xl font-semibold">Breaks</h1>
       <p className="mt-1 text-sm text-muted">
         Stocks still closed through the previous day high or low. A name that broke and then probed stays on Probed.
-        Check a name to store it. Saved names are on{" "}
+        Check a name to store it. Hide a name to leave it off All, High, and Low. Hidden names and picked names clear
+        on the first Kite login of the day. Saved names are on{" "}
         <Link href="/picks" className="text-gold">
           Picked
         </Link>
@@ -188,6 +214,7 @@ export default function Breaks() {
               columns={2}
               mode="break"
               minStrength={minStrength}
+              conceal
               render={(stock, side) => (
                 <BreakCard
                   stock={stock}
@@ -210,6 +237,16 @@ export default function Breaks() {
                       }}
                     />
                     Keep
+                  </label>
+                  <label className="inline-flex min-h-11 items-center gap-2 px-3 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-5 accent-gold"
+                      checked={stock.hidden}
+                      disabled={busy}
+                      onChange={(event) => void hide(stock.instrument_token, event.target.checked)}
+                    />
+                    Hide
                   </label>
                   {pending === stock.instrument_token ? (
                     <div className="flex flex-wrap items-center gap-2">

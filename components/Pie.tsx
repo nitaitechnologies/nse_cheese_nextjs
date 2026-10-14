@@ -10,7 +10,7 @@ const SLICES = [
   { key: "unpriced", color: "#5c6b56" },
 ] as const;
 
-function wheel(breadth: Breadth): string {
+export function pieBackground(breadth: Breadth): string {
   if (breadth.total === 0) return "conic-gradient(#31402c 0% 100%)";
   let cursor = 0;
   const stops = SLICES.flatMap((slice) => {
@@ -37,7 +37,15 @@ function hasQuote(breadth: PieModel): boolean {
   return breadth.last != null || breadth.prevClose != null;
 }
 
-export default function BreadthPie({ breadth, onRemove }: { breadth: PieModel; onRemove?: () => void }) {
+export default function BreadthPie({
+  breadth,
+  onRemove,
+  onReplay,
+}: {
+  breadth: PieModel;
+  onRemove?: () => void;
+  onReplay?: () => void;
+}) {
   const label = [
     breadth.label,
     `${breadth.advance} advancing`,
@@ -47,16 +55,25 @@ export default function BreadthPie({ breadth, onRemove }: { breadth: PieModel; o
   ].join(", ");
   return (
     <article className="relative flex min-w-40 flex-1 flex-col items-center rounded-2xl border border-line bg-panel px-3 py-4">
+      {onReplay ? (
+        <button
+          type="button"
+          aria-label={`Replay ${breadth.label}`}
+          className="absolute inset-0 z-0 rounded-2xl"
+          onClick={onReplay}
+        />
+      ) : null}
       {onRemove ? (
         <button
           type="button"
           aria-label={`Remove ${breadth.label}`}
-          className="absolute right-2 top-2 min-h-8 rounded-lg px-2 text-xs text-muted"
+          className="absolute right-2 top-2 z-10 min-h-8 rounded-lg px-2 text-xs text-muted"
           onClick={onRemove}
         >
           Remove
         </button>
       ) : null}
+      <div className={`flex w-full flex-col items-center ${onReplay ? "pointer-events-none relative z-0" : ""}`}>
       <h3 className={`text-center text-sm font-medium break-words ${onRemove ? "px-10" : ""}`}>{breadth.label}</h3>
       {breadth.symbol && breadth.symbol !== breadth.label ? (
         <p className="text-xs text-muted">{breadth.symbol}</p>
@@ -72,7 +89,7 @@ export default function BreadthPie({ breadth, onRemove }: { breadth: PieModel; o
       ) : null}
       <div
         className="relative mt-3 size-28 rounded-full"
-        style={{ background: wheel(breadth) }}
+        style={{ background: pieBackground(breadth) }}
         role="img"
         aria-label={label}
       >
@@ -82,6 +99,8 @@ export default function BreadthPie({ breadth, onRemove }: { breadth: PieModel; o
         </div>
       </div>
       <p className="mt-3 text-center text-xs text-muted">{caption(breadth)}</p>
+      {onReplay ? <p className="mt-2 text-xs text-gold">Replay</p> : null}
+      </div>
     </article>
   );
 }
