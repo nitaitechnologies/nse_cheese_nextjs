@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { api } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import { levelText, money, tickAge } from "./format";
+import DeskBreadth from "./DeskBreadth";
 import PickedIndices from "./PickedIndices";
-import BreadthPie from "./Pie";
 import type { DashboardBreadth, DashboardPayload, WatchRow } from "@/lib/types";
 
 type QuoteEvent = {
@@ -14,50 +15,63 @@ type QuoteEvent = {
 };
 
 export default function Desk() {
+  const { date, live, ready } = useSessionDate();
+  const dateRef = useRef(date);
+  useEffect(() => {
+    dateRef.current = date;
+  }, [date]);
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [breadth, setBreadth] = useState<DashboardBreadth | null>(null);
   const [error, setError] = useState("");
   const [now, setNow] = useState(0);
 
   const load = useCallback(async () => {
+    const requested = date;
     try {
-      const next = await api<DashboardPayload>("/api/dashboard");
+      const next = await api<DashboardPayload>(dated("/api/dashboard", requested));
+      if (dateRef.current !== requested) return;
       setData(next);
       setBreadth(next.breadth);
       setError("");
     } catch (err) {
+      if (dateRef.current !== requested) return;
       setError(err instanceof Error ? err.message : "Could not load the desk");
     }
-  }, []);
+  }, [date]);
 
   useEffect(() => {
+    if (!ready) return;
     const first = window.setTimeout(() => {
       setNow(Date.now());
       void load();
     }, 0);
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
-    const source = new EventSource("/api/stream");
-    source.addEventListener("quotes", (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as QuoteEvent[];
-      setData((current) => (current ? applyPrices(current, payload) : current));
-    });
-    source.addEventListener("breakout", () => void load());
-    source.addEventListener("status", (event) => {
-      const status = JSON.parse((event as MessageEvent).data) as DashboardPayload["worker"];
-      setData((current) => (current ? { ...current, worker: status } : current));
-    });
-    const breadthTimer = window.setInterval(() => {
-      void api<DashboardBreadth>("/api/breadth")
-        .then(setBreadth)
-        .catch(() => undefined);
-    }, 15000);
+    let source: EventSource | null = null;
+    let breadthTimer: number | undefined;
+    if (live) {
+      source = new EventSource("/api/stream");
+      source.addEventListener("quotes", (event) => {
+        const payload = JSON.parse((event as MessageEvent).data) as QuoteEvent[];
+        setData((current) => (current ? applyPrices(current, payload) : current));
+      });
+      source.addEventListener("breakout", () => void load());
+      source.addEventListener("status", (event) => {
+        const status = JSON.parse((event as MessageEvent).data) as DashboardPayload["worker"];
+        setData((current) => (current ? { ...current, worker: status } : current));
+      });
+      breadthTimer = window.setInterval(() => {
+        void api<DashboardBreadth>(dated("/api/breadth", date))
+          .then(setBreadth)
+          .catch(() => undefined);
+      }, 15000);
+    }
     return () => {
       window.clearTimeout(first);
       window.clearInterval(clock);
-      window.clearInterval(breadthTimer);
-      source.close();
+      if (breadthTimer != null) window.clearInterval(breadthTimer);
+      source?.close();
     };
-  }, [load]);
+  }, [load, ready, live, date]);
 
   if (!data && !error) {
     return <p className="px-4 pt-8 text-muted">Loading the session…</p>;
@@ -85,14 +99,7 @@ export default function Desk() {
       </header>
       <Status data={data} now={now} />
       {error ? <p className="mt-3 text-sm text-down">{error}</p> : null}
-      <section className="mt-6">
-        <h2 className="text-sm font-medium text-muted">Advance / decline</h2>
-        <div className="mt-3 flex flex-wrap gap-3">
-          <BreadthPie breadth={(breadth ?? data.breadth).market} />
-          <BreadthPie breadth={(breadth ?? data.breadth).nifty50} />
-          <BreadthPie breadth={(breadth ?? data.breadth).banknifty} />
-        </div>
-      </section>
+      <DeskBreadth breadth={breadth ?? data.breadth} date={date} onBreadth={setBreadth} />
       <PickedIndices />
       <section className="mt-6">
         <h2 className="text-sm font-medium text-muted">Closed through the prior day</h2>

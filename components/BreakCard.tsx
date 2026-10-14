@@ -39,8 +39,20 @@ export default function BreakCard({
         <p className="mt-1 text-xs text-muted">No 5-minute break of the previous high or low today.</p>
       ) : (
         stock.events.map((event) => (
-          <p key={event.side} className={`mt-1 text-xs ${event.side === "PDH" ? "text-up" : "text-down"}`}>
-            {eventLine(event)}
+          <p
+            key={event.side}
+            className={`mt-1 flex flex-wrap items-center gap-1.5 text-xs ${event.side === "PDH" ? "text-up" : "text-down"}`}
+          >
+            {!event.probeTime && event.strength > 0 ? (
+              <span
+                className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-gold px-1.5 font-mono font-semibold text-ink"
+                title="Strength"
+              >
+                <span className="sr-only">Strength </span>
+                {event.strength}
+              </span>
+            ) : null}
+            <span>{eventLine(event)}</span>
           </p>
         ))
       )}

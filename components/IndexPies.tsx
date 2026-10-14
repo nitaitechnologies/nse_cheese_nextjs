@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import BreadthPie from "./Pie";
 import type { IndexCard, IndexRow } from "@/lib/types";
 
@@ -33,12 +34,14 @@ export default function IndexPies({
 }) {
   const [indices, setIndices] = useState<IndexRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const { date, ready } = useSessionDate();
 
   useEffect(() => {
+    if (!ready) return;
     let gone = false;
     async function refresh() {
       try {
-        const body = await api<{ indices: IndexRow[] }>("/api/indices");
+        const body = await api<{ indices: IndexRow[] }>(dated("/api/indices", date));
         if (!gone) {
           setIndices(body.indices);
           setLoaded(true);
@@ -58,7 +61,7 @@ export default function IndexPies({
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, []);
+  }, [date, ready]);
 
   if (symbols.length === 0) {
     return (

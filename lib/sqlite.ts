@@ -5,6 +5,7 @@ import { envOptional } from "./env";
 
 const globalForSqlite = globalThis as typeof globalThis & {
   sqlite?: DatabaseSync;
+  deskPiesReady?: boolean;
 };
 
 const SCHEMA = `
@@ -138,6 +139,10 @@ CREATE TABLE IF NOT EXISTS pie_picks (
   symbol TEXT PRIMARY KEY,
   added_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS desk_pies (
+  symbol TEXT PRIMARY KEY,
+  added_at TEXT NOT NULL
+);
 `;
 
 export function sqlitePath(): string {
@@ -160,6 +165,12 @@ export function getDb(): DatabaseSync {
     db.exec("CREATE TEMP TABLE IF NOT EXISTS kept_tokens (token INTEGER PRIMARY KEY)");
     globalForSqlite.sqlite = db;
   }
+  if (!globalForSqlite.deskPiesReady) {
+    globalForSqlite.sqlite.exec(
+      "CREATE TABLE IF NOT EXISTS desk_pies (symbol TEXT PRIMARY KEY, added_at TEXT NOT NULL)",
+    );
+    globalForSqlite.deskPiesReady = true;
+  }
   return globalForSqlite.sqlite;
 }
 
@@ -171,6 +182,7 @@ export function readyDb(): Promise<void> {
 export function closeDb(): void {
   globalForSqlite.sqlite?.close();
   globalForSqlite.sqlite = undefined;
+  globalForSqlite.deskPiesReady = false;
 }
 
 let transactionDepth = 0;

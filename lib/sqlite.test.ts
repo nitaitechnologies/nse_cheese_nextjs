@@ -3,19 +3,33 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { closeDb } from "./sqlite";
+import { closeDb, one, run } from "./sqlite";
 import {
   claimJob,
   claimNotice,
   enqueueJob,
   getDayCandles,
+  getKiteSession,
   getPreviousDaily,
   getSettings,
+  listQuotes,
   listSessionLastCloses,
+  listSignals,
+  markCoverage,
+  missingCoverage,
+  pruneExpiredData,
   saveDayCandles,
+  saveKiteSession,
   saveSettings,
+  updateJob,
   upsertDailyBars,
   upsertQuotes,
+  upsertSignal,
+  addDeskPie,
+  createIndex,
+  dashboardBreadth,
+  deleteIndex,
+  removeDeskPie,
 } from "./store";
 
 const dir = mkdtempSync(path.join(tmpdir(), "nse-sqlite-"));
@@ -29,7 +43,7 @@ after(() => {
 test("settings round-trip through the sqlite file", async () => {
   const initial = await getSettings();
   assert.equal(initial.minStrength, 3);
-  assert.equal(initial.backfillDays, 30);
+  assert.equal(initial.backfillDays, 15);
   const saved = await saveSettings({ minStrength: 4, backfillDays: 12 });
   assert.equal(saved.minStrength, 4);
   assert.equal(saved.backfillDays, 12);
@@ -104,8 +118,139 @@ test("quote flush keeps an existing previous close", async () => {
       updatedAt: new Date("2026-10-10T04:00:02.000Z"),
     },
   ]);
-  const { listQuotes } = await import("./store");
   const [quote] = await listQuotes([1]);
   assert.equal(quote?.last_price, 11.5);
   assert.equal(quote?.prev_close, 10);
 });
+
+test("data older than 15 days is removed", async () => {
+  const asOf = new Date("2026-11-01T08:00:00.000Z");
+  await upsertDailyBars([
+    bar(9, "2026-10-06"),
+    bar(9, "2026-10-07"),
+  ]);
+  await saveDayCandles({
+    instrument_token: 9,
+    tradingsymbol: "OLD",
+    date: "2026-10-16",
+    candles: [{ time: "09:15", ts: 1, open: 1, high: 1, low: 1, close: 1, volume: 1 }],
+  });
+  await saveDayCandles({
+    instrument_token: 9,
+    tradingsymbol: "OLD",
+    date: "2026-10-17",
+    candles: [{ time: "09:15", ts: 1, open: 2, high: 2, low: 2, close: 2, volume: 2 }],
+  });
+  await upsertSignal({
+    instrument_token: 9,
+    tradingsymbol: "OLD",
+    date: "2026-10-16",
+    side: "PDH",
+    time: "09:20",
+    ts: 1,
+    close: 1,
+    level: 1,
+    volume: 1,
+    strength: 3,
+    volumeScore: 1,
+    wickScore: 1,
+    depthScore: 1,
+    relativeVolume: null,
+  });
+  await markCoverage(9, "5minute", ["2026-10-16", "2026-10-17"]);
+  await markCoverage(9, "day", ["2026-10-06", "2026-10-07"]);
+  await upsertQuotes([
+    {
+      instrument_token: 9,
+      tradingsymbol: "OLD",
+      last_price: 1,
+      prev_close: 1,
+      forming: null,
+      date: "2026-10-16",
+      updatedAt: new Date("2026-10-16T04:00:00.000Z"),
+    },
+    {
+      instrument_token: 10,
+      tradingsymbol: "NEW",
+      last_price: 2,
+      prev_close: 2,
+      forming: null,
+      date: "2026-10-17",
+      updatedAt: new Date("2026-10-17T04:00:00.000Z"),
+    },
+  ]);
+  await saveKiteSession({
+    accessToken: "stale",
+    userId: "u",
+    userName: "n",
+    loginTime: new Date("2026-10-16T04:00:00.000Z"),
+  });
+  await saveKiteSession({
+    accessToken: "fresh",
+    userId: "u",
+    userName: "n",
+    loginTime: new Date("2026-10-17T04:00:00.000Z"),
+  });
+  const finished = await enqueueJob("instruments");
+  await updateJob(finished._id, { status: "done", progress: { done: 1, total: 1, message: "done" } });
+  run("UPDATE jobs SET created_at = ? WHERE id = ?", ["2026-10-01T00:00:00.000Z", Number(finished._id)]);
+  await claimNotice("old-notice");
+  run("UPDATE notices SET created_at = ? WHERE id = ?", ["2026-10-01T00:00:00.000Z", "old-notice"]);
+
+  const { removed } = await pruneExpiredData(asOf);
+  assert.ok(removed >= 6);
+  assert.equal(await getPreviousDaily(9, "2026-10-07"), null);
+  assert.equal((await getPreviousDaily(9, "2026-11-01"))?.date, "2026-10-07");
+  assert.equal((await getDayCandles(9, "2026-10-16")).length, 0);
+  assert.equal((await getDayCandles(9, "2026-10-17")).length, 1);
+  assert.equal((await listSignals("2026-10-16")).length, 0);
+  assert.deepEqual(await missingCoverage(9, "5minute", ["2026-10-16", "2026-10-17"]), ["2026-10-16"]);
+  assert.deepEqual(await missingCoverage(9, "day", ["2026-10-06", "2026-10-07"]), ["2026-10-06"]);
+  assert.equal((await listQuotes([9])).length, 0);
+  assert.equal((await listQuotes([10])).length, 1);
+  assert.equal(await getKiteSession("2026-10-16"), null);
+  assert.equal((await getKiteSession("2026-10-17"))?.access_token, "fresh");
+  assert.equal(one("SELECT id FROM notices WHERE id = ?", ["old-notice"]), undefined);
+  assert.equal(one("SELECT id FROM jobs WHERE id = ?", [Number(finished._id)]), undefined);
+  assert.equal(one("SELECT status FROM jobs WHERE type = ?", ["backfill"])?.status, "running");
+});
+
+test("pinned indices become extra desk pies", async () => {
+  await createIndex("NIFTY IT", "Nifty IT");
+  await createIndex("NIFTY 50", "Nifty 50");
+  try {
+    assert.equal(await addDeskPie("nifty it"), "NIFTY IT");
+    await assert.rejects(() => addDeskPie("NIFTY 50"), /already on the desk/);
+    const breadth = await dashboardBreadth("2026-10-14");
+    assert.equal(breadth.extras.length, 1);
+    assert.equal(breadth.extras[0]?.symbol, "NIFTY IT");
+    assert.equal(breadth.extras[0]?.label, "Nifty IT");
+    assert.equal(breadth.nifty50.missing, false);
+    assert.equal(breadth.nifty50.symbol, "NIFTY 50");
+    await removeDeskPie("NIFTY IT");
+    assert.equal((await dashboardBreadth("2026-10-14")).extras.length, 0);
+  } finally {
+    await removeDeskPie("NIFTY IT");
+    await removeDeskPie("NIFTY 50");
+    for (const symbol of ["NIFTY IT", "NIFTY 50"]) {
+      try {
+        await deleteIndex(symbol);
+      } catch {
+        // The index was already removed.
+      }
+    }
+  }
+});
+
+function bar(token: number, date: string) {
+  return {
+    instrument_token: token,
+    tradingsymbol: "OLD",
+    date,
+    open: 1,
+    high: 2,
+    low: 1,
+    close: 1,
+    volume: 1,
+  };
+}

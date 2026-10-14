@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { api } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import { money, signed, signedPct, tone } from "./format";
 import BreadthPie from "./Pie";
 import StockCard from "./StockCard";
@@ -33,18 +34,24 @@ export default function IndexView({ symbol }: { symbol: string }) {
   const [filterText, setFilterText] = useState("");
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const { date, ready } = useSessionDate();
+  const dateRef = useRef(date);
+  dateRef.current = date;
 
   async function refresh() {
+    const requested = date;
     const [indexBody, stockBody] = await Promise.all([
-      api<{ indices: IndexRow[] }>("/api/indices"),
-      api<{ stocks: StockBoardRow[] }>("/api/stocks"),
+      api<{ indices: IndexRow[] }>(dated("/api/indices", requested)),
+      api<{ stocks: StockBoardRow[] }>(dated("/api/stocks", requested)),
     ]);
+    if (dateRef.current !== requested) return;
     setIndex(indexBody.indices.find((item) => item.symbol === key) ?? null);
     setStocks(stockBody.stocks.filter((stock) => stock.indices.includes(key)));
     setLoaded(true);
   }
 
   useEffect(() => {
+    if (!ready) return;
     const timer = window.setTimeout(() => {
       void refresh().catch((err) => setError(err instanceof Error ? err.message : "Could not load the index"));
     }, 0);
@@ -55,7 +62,7 @@ export default function IndexView({ symbol }: { symbol: string }) {
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, [key]);
+  }, [key, date, ready]);
 
   async function remove(token: number) {
     setError("");

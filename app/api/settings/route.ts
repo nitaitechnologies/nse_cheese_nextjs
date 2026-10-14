@@ -3,6 +3,7 @@ import { envOptional } from "@/lib/env";
 import { unauthorized } from "@/lib/guard";
 import { kiteCallbackOrigin } from "@/lib/kite-origin";
 import { countInstruments, getKiteSession, getSettings, saveSettings, setPushoverMuted } from "@/lib/store";
+import { RETENTION_DAYS } from "@/lib/retention";
 import { istDateString, istTimeHM } from "@/lib/time";
 
 async function settingsBody() {
@@ -55,8 +56,8 @@ export async function PUT(request: Request) {
   if (!Number.isInteger(minStrength) || minStrength < 1 || minStrength > 5) {
     return NextResponse.json({ error: "Strength must be from 1 to 5" }, { status: 400 });
   }
-  if (!Number.isInteger(backfillDays) || backfillDays < 1 || backfillDays > 400) {
-    return NextResponse.json({ error: "Backfill days must be from 1 to 400" }, { status: 400 });
+  if (!Number.isInteger(backfillDays) || backfillDays < 1 || backfillDays > RETENTION_DAYS) {
+    return NextResponse.json({ error: `Backfill days must be from 1 to ${RETENTION_DAYS}` }, { status: 400 });
   }
   await saveSettings({ minStrength, backfillDays });
   return NextResponse.json(await settingsBody());

@@ -3,6 +3,11 @@ export async function endSession(): Promise<void> {
   window.location.assign("/login");
 }
 
+export function dated(path: string, date: string): string {
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}date=${encodeURIComponent(date)}`;
+}
+
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,

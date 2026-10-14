@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import EventFilters from "./EventFilters";
 import StockCard from "./StockCard";
 import { eventVisible, type EventFilter } from "@/lib/signals";
@@ -16,14 +17,20 @@ export default function Stocks() {
   const [count, setCount] = useState(0);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const { date, ready } = useSessionDate();
+  const dateRef = useRef(date);
+  dateRef.current = date;
 
   async function refresh() {
-    const stockBody = await api<{ stocks: StockBoardRow[] }>("/api/stocks");
+    const requested = date;
+    const stockBody = await api<{ stocks: StockBoardRow[] }>(dated("/api/stocks", requested));
+    if (dateRef.current !== requested) return;
     setStocks(stockBody.stocks);
     setLoaded(true);
   }
 
   useEffect(() => {
+    if (!ready) return;
     const timer = window.setTimeout(() => {
       void refresh().catch((err) => setError(err instanceof Error ? err.message : "Could not load stocks"));
       void api<{ count: number }>("/api/instruments/search?q=")
@@ -37,7 +44,7 @@ export default function Stocks() {
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, []);
+  }, [date, ready]);
 
   useEffect(() => {
     if (query.trim().length < 1) {

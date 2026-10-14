@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { api } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import BreakCard from "./BreakCard";
 import BreakGroups from "./BreakGroups";
 import IndexPies from "./IndexPies";
@@ -24,16 +25,22 @@ export default function Probed() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const { openIndices, stamp, accept, toggle } = usePiePicks();
+  const { date, ready } = useSessionDate();
+  const dateRef = useRef(date);
+  dateRef.current = date;
 
   async function refresh() {
+    const requested = date;
     const seen = stamp();
-    const body = await api<{ stocks: BreakPickRow[]; pies: string[] }>("/api/probes");
+    const body = await api<{ stocks: BreakPickRow[]; pies: string[] }>(dated("/api/probes", requested));
+    if (dateRef.current !== requested) return;
     setStocks(body.stocks);
     accept(body.pies, seen);
     setLoaded(true);
   }
 
   useEffect(() => {
+    if (!ready) return;
     const timer = window.setTimeout(() => {
       void refresh().catch((err) => setError(err instanceof Error ? err.message : "Could not load probes"));
     }, 0);
@@ -44,7 +51,7 @@ export default function Probed() {
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, []);
+  }, [date, ready]);
 
   function mark(token: number, picked: boolean) {
     setStocks((current) =>
@@ -59,7 +66,7 @@ export default function Probed() {
     try {
       await api("/api/picks", {
         method: "POST",
-        body: JSON.stringify({ instrument_token: token }),
+        body: JSON.stringify({ instrument_token: token, date }),
       });
       setPending(null);
       await refresh();

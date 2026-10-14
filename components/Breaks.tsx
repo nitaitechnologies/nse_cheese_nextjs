@@ -1,13 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { api } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import BreakCard from "./BreakCard";
 import BreakGroups from "./BreakGroups";
 import IndexPies from "./IndexPies";
 import { usePiePicks } from "./usePiePicks";
 import type { BreakPickRow } from "@/lib/types";
+
+const STRENGTHS = [1, 2, 3, 4, 5] as const;
+
+function matchesQuery(stock: BreakPickRow, needle: string): boolean {
+  if (!needle) return true;
+  return (
+    stock.tradingsymbol.toLowerCase().includes(needle) ||
+    stock.name.toLowerCase().includes(needle) ||
+    stock.indices.some((index) => index.toLowerCase().includes(needle))
+  );
+}
 
 export default function Breaks() {
   const [stocks, setStocks] = useState<BreakPickRow[]>([]);
@@ -16,33 +28,43 @@ export default function Breaks() {
   const [pending, setPending] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
+  const [minStrength, setMinStrength] = useState(1);
   const { openIndices, stamp, accept, toggle } = usePiePicks();
+  const { date, ready, live } = useSessionDate();
+  const dateRef = useRef(date);
+  dateRef.current = date;
 
   async function refresh() {
+    const requested = date;
     const seen = stamp();
-    const body = await api<{ stocks: BreakPickRow[]; pies: string[] }>("/api/breaks");
+    const body = await api<{ stocks: BreakPickRow[]; pies: string[] }>(dated("/api/breaks", requested));
+    if (dateRef.current !== requested) return;
     setStocks(body.stocks);
     accept(body.pies, seen);
     setLoaded(true);
   }
 
   useEffect(() => {
+    if (!ready) return;
     const timer = window.setTimeout(() => {
       void refresh().catch((err) => setError(err instanceof Error ? err.message : "Could not load breaks"));
     }, 0);
-    const source = new EventSource("/api/stream");
-    source.addEventListener("breakout", () => {
-      void refresh().catch(() => undefined);
-    });
+    let source: EventSource | null = null;
+    if (live) {
+      source = new EventSource("/api/stream");
+      source.addEventListener("breakout", () => {
+        void refresh().catch(() => undefined);
+      });
+    }
     const poll = window.setInterval(() => {
       void refresh().catch(() => undefined);
     }, 5000);
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(poll);
-      source.close();
+      source?.close();
     };
-  }, []);
+  }, [date, ready, live]);
 
   function mark(token: number, picked: boolean) {
     setStocks((current) =>
@@ -57,7 +79,7 @@ export default function Breaks() {
     try {
       await api("/api/picks", {
         method: "POST",
-        body: JSON.stringify({ instrument_token: token }),
+        body: JSON.stringify({ instrument_token: token, date }),
       });
       setPending(null);
       await refresh();
@@ -97,14 +119,19 @@ export default function Breaks() {
   }
 
   const needle = query.trim().toLowerCase();
-  const visible = stocks.filter((stock) => {
-    if (!needle) return true;
-    return (
-      stock.tradingsymbol.toLowerCase().includes(needle) ||
-      stock.name.toLowerCase().includes(needle) ||
-      stock.indices.some((index) => index.toLowerCase().includes(needle))
-    );
-  });
+  const searched = stocks.filter((stock) => matchesQuery(stock, needle));
+  const strengthCounts = STRENGTHS.map((min) =>
+    searched.reduce(
+      (total, stock) => total + stock.events.filter((event) => event.strength >= min).length,
+      0,
+    ),
+  );
+  const visible = searched
+    .map((stock) => ({
+      ...stock,
+      events: stock.events.filter((event) => event.strength >= minStrength),
+    }))
+    .filter((stock) => stock.events.length > 0);
 
   return (
     <main className="px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-8">
@@ -129,59 +156,85 @@ export default function Breaks() {
           <p className="text-sm text-muted">Loading breaks…</p>
         ) : stocks.length === 0 ? (
           <p className="text-sm text-muted">No stock has closed through the previous high or low yet.</p>
-        ) : visible.length === 0 ? (
-          <p className="text-sm text-muted">No stocks match this search.</p>
         ) : (
-          <BreakGroups
-            stocks={visible}
-            columns={2}
-            render={(stock) => (
-            <BreakCard
-              stock={stock}
-              copyIndex={false}
-              openIndices={openIndices}
-              onIndex={(symbol) => void toggleIndex(symbol)}
-            >
-              <label className="inline-flex min-h-11 items-center gap-2 px-3 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-5 accent-gold"
-                  checked={stock.picked}
-                  disabled={busy}
-                  onChange={(event) => {
-                    if (event.target.checked) {
-                      void keep(stock.instrument_token);
-                      return;
-                    }
-                    setPending(stock.instrument_token);
-                  }}
-                />
-                Keep
-              </label>
-              {pending === stock.instrument_token ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm">Uncheck {stock.tradingsymbol}?</p>
-                  <button
-                    type="button"
-                    className="min-h-11 rounded-xl px-3 text-sm"
-                    disabled={busy}
-                    onClick={() => setPending(null)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="min-h-11 rounded-xl px-3 text-sm text-down"
-                    disabled={busy}
-                    onClick={() => void uncheck(stock.instrument_token)}
-                  >
-                    Uncheck
-                  </button>
-                </div>
-              ) : null}
-            </BreakCard>
-            )}
-          />
+          <>
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <span className="shrink-0 text-xs text-muted">Strength</span>
+            {STRENGTHS.map((value, index) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={minStrength === value}
+                className={`min-h-9 shrink-0 rounded-full border px-3 text-xs ${
+                  minStrength === value
+                    ? "border-gold bg-gold font-semibold text-ink"
+                    : "border-line text-muted"
+                }`}
+                onClick={() => setMinStrength(value)}
+              >
+                {value}+ {strengthCounts[index]}
+              </button>
+            ))}
+          </div>
+          {visible.length === 0 ? (
+            <p className="text-sm text-muted">
+              {searched.length === 0
+                ? "No stocks match this search."
+                : `No breaks at strength ${minStrength} or higher.`}
+            </p>
+          ) : (
+            <BreakGroups
+              stocks={visible}
+              columns={2}
+              render={(stock) => (
+                <BreakCard
+                  stock={stock}
+                  copyIndex={false}
+                  openIndices={openIndices}
+                  onIndex={(symbol) => void toggleIndex(symbol)}
+                >
+                  <label className="inline-flex min-h-11 items-center gap-2 px-3 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-5 accent-gold"
+                      checked={stock.picked}
+                      disabled={busy}
+                      onChange={(event) => {
+                        if (event.target.checked) {
+                          void keep(stock.instrument_token);
+                          return;
+                        }
+                        setPending(stock.instrument_token);
+                      }}
+                    />
+                    Keep
+                  </label>
+                  {pending === stock.instrument_token ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm">Uncheck {stock.tradingsymbol}?</p>
+                      <button
+                        type="button"
+                        className="min-h-11 rounded-xl px-3 text-sm"
+                        disabled={busy}
+                        onClick={() => setPending(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="min-h-11 rounded-xl px-3 text-sm text-down"
+                        disabled={busy}
+                        onClick={() => void uncheck(stock.instrument_token)}
+                      >
+                        Uncheck
+                      </button>
+                    </div>
+                  ) : null}
+                </BreakCard>
+              )}
+            />
+          )}
+          </>
         )}
         </div>
         <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">

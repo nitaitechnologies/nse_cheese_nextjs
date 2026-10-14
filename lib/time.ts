@@ -111,3 +111,15 @@ export function chunkDates(
 export function istDateTime(dateStr: string, time: string): Date {
   return new Date(istTimestamp(dateStr, time) * 1000);
 }
+
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+export function clampSessionDate(value: string | null | undefined, now = new Date()): string {
+  const today = istDateString(now);
+  if (!value || !DATE_KEY.test(value) || value > today) return today;
+  return value;
+}
+
+export function sessionDateFromRequest(request: Request): string {
+  return clampSessionDate(new URL(request.url).searchParams.get("date"));
+}

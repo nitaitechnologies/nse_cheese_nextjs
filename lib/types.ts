@@ -231,6 +231,7 @@ export type DashboardBreadth = {
   market: IndexCard;
   nifty50: IndexCard;
   banknifty: IndexCard;
+  extras: IndexCard[];
 };
 
 export type WatchRow = {

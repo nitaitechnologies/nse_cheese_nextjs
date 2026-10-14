@@ -12,7 +12,7 @@ import {
   listQuotes,
   sessionPrice,
 } from "@/lib/store";
-import { istDateString } from "@/lib/time";
+import { istDateString, sessionDateFromRequest } from "@/lib/time";
 
 export async function GET(
   request: Request,
@@ -29,8 +29,7 @@ export async function GET(
   if (!instrument) {
     return NextResponse.json({ error: "Symbol is not in the instrument list" }, { status: 404 });
   }
-  const requested = new URL(request.url).searchParams.get("date");
-  const date = requested && /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : istDateString(new Date());
+  const date = sessionDateFromRequest(request);
   const closed = await getDayCandles(token, date);
   const previous = await getPreviousDaily(token, date);
   const prior = await getPreviousSessionCandles(token, date);

@@ -11,22 +11,23 @@ import {
   listStocks,
   readRuntime,
 } from "@/lib/store";
-import { istDateString } from "@/lib/time";
+import { istDateString, sessionDateFromRequest } from "@/lib/time";
 import type { DashboardPayload, WatchRow } from "@/lib/types";
 
-export async function GET() {
+export async function GET(request: Request) {
   const denied = await unauthorized();
   if (denied) return denied;
-  const date = istDateString(new Date());
+  const date = sessionDateFromRequest(request);
+  const today = istDateString(new Date());
   const [session, runtime, stocks, signals, breadth] = await Promise.all([
-    getKiteSession(date),
+    getKiteSession(today),
     readRuntime(),
     listStocks(),
     listSignals(date),
     dashboardBreadth(date),
   ]);
   const tokens = stocks.map((item) => item.instrument_token);
-  const quotes = await listQuotes(tokens);
+  const quotes = date === today ? await listQuotes(tokens) : [];
   const quoted = new Map(quotes.map((row) => [row.instrument_token, row.last_price]));
   const [ranges, closes] = await Promise.all([
     listPreviousRanges(tokens, date),

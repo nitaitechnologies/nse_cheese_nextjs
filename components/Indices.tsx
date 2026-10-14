@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { api } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import { money, signed, signedPct, tone } from "./format";
 import type { IndexRow } from "@/lib/types";
 
@@ -16,14 +17,20 @@ export default function Indices() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const { date, ready } = useSessionDate();
+  const dateRef = useRef(date);
+  dateRef.current = date;
 
   async function refresh() {
-    const body = await api<{ indices: IndexRow[] }>("/api/indices");
+    const requested = date;
+    const body = await api<{ indices: IndexRow[] }>(dated("/api/indices", requested));
+    if (dateRef.current !== requested) return;
     setIndices(body.indices);
     setLoaded(true);
   }
 
   useEffect(() => {
+    if (!ready) return;
     const timer = window.setTimeout(() => {
       void refresh().catch((err) => setError(err instanceof Error ? err.message : "Could not load indices"));
     }, 0);
@@ -34,7 +41,7 @@ export default function Indices() {
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, []);
+  }, [date, ready]);
 
   async function create() {
     setError("");

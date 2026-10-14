@@ -11,10 +11,12 @@ import {
   getKiteSession,
   getSettings,
   listFeedTargets,
+  pruneExpiredData,
   requeueInterruptedJobs,
   updateJob,
   writeRuntime,
 } from "../lib/store";
+import { RETENTION_DAYS } from "../lib/retention";
 import { istDateString, istTimeHM, isMarketOpen, isWeekdayIst } from "../lib/time";
 import {
   connectedSince,
@@ -119,7 +121,7 @@ async function runJobs(): Promise<void> {
       });
       return;
     }
-    await backfillStocks(job.days ?? 30, async (done, total, message) => {
+    await backfillStocks(job.days ?? RETENTION_DAYS, async (done, total, message) => {
       await updateJob(job._id, {
         status: "running",
         progress: { done, total, message },
@@ -226,8 +228,18 @@ async function controlLoop(): Promise<void> {
   await publishStatus(Boolean(session));
 }
 
+async function pruneOldData(): Promise<void> {
+  try {
+    const { removed } = await pruneExpiredData();
+    if (removed > 0) console.log(`[worker] removed ${removed} rows older than ${RETENTION_DAYS} days`);
+  } catch (error) {
+    console.error("[worker] retention prune failed", error);
+  }
+}
+
 async function main(): Promise<void> {
   await readyDb();
+  await pruneOldData();
   startStream();
   const zone = { timezone: envOptional("TZ") ?? "Asia/Kolkata" };
   cron.schedule("45 8 * * 1-5", () => void remind("0845"), { timezone: "Asia/Kolkata" });
@@ -236,6 +248,7 @@ async function main(): Promise<void> {
     console.error("[worker] instrument sync failed", error);
   }), zone);
   cron.schedule("40 15 * * 1-5", () => void reconcile(), zone);
+  cron.schedule("10 16 * * *", () => void pruneOldData(), zone);
   setInterval(() => void controlLoop().catch((error) => console.error(error)), 5000);
   setInterval(() => publishForming(), 1000);
   setInterval(() => void flushQuotes().catch((error) => console.error(error)), 2000);

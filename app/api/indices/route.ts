@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { unauthorized } from "@/lib/guard";
 import { createIndex, deleteIndex, listIndices, renameIndex } from "@/lib/store";
+import { sessionDateFromRequest } from "@/lib/time";
 
-export async function GET() {
+export async function GET(request: Request) {
   const denied = await unauthorized();
   if (denied) return denied;
-  const indices = await listIndices();
+  const indices = await listIndices(sessionDateFromRequest(request));
   return NextResponse.json({ indices });
 }
 

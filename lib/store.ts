@@ -1,5 +1,6 @@
-import { classifyMove, isIndexSymbol, normalizeIndexSymbol, pickIndex, priceChange, tally } from "./breadth";
+import { breadthSlot, classifyMove, isIndexSymbol, normalizeIndexSymbol, pickIndex, priceChange, tally } from "./breadth";
 import { detectProbes } from "./signals";
+import { clampBackfillDays, dailyRetentionCutoff, RETENTION_DAYS, retentionCutoff } from "./retention";
 import { all, duplicateKey, fillKeptTokens, getDb, one, readyDb, run, transaction, type Row } from "./sqlite";
 import { istDateString } from "./time";
 import type {
@@ -206,7 +207,7 @@ export async function getSettings(): Promise<SettingsDoc> {
   return {
     _id: SETTINGS_ID,
     minStrength: doc ? num(doc, "min_strength") : 3,
-    backfillDays: doc ? num(doc, "backfill_days") : 30,
+    backfillDays: clampBackfillDays(doc ? num(doc, "backfill_days") : RETENTION_DAYS),
     pushoverMutedDate: doc?.pushover_muted_date == null ? null : String(doc.pushover_muted_date),
   };
 }
@@ -236,9 +237,33 @@ export async function saveSettings(input: {
      ON CONFLICT(id) DO UPDATE SET
        min_strength = excluded.min_strength,
        backfill_days = excluded.backfill_days`,
-    [SETTINGS_ID, input.minStrength, input.backfillDays, current.pushoverMutedDate],
+    [SETTINGS_ID, input.minStrength, clampBackfillDays(input.backfillDays), current.pushoverMutedDate],
   );
   return getSettings();
+}
+
+export async function pruneExpiredData(now = new Date()): Promise<{ removed: number }> {
+  await readyDb();
+  const cutoff = retentionCutoff(istDateString(now));
+  const dailyCutoff = dailyRetentionCutoff(istDateString(now));
+  const removed = transaction(() => {
+    const deleted = [
+      run("DELETE FROM candles_5m WHERE date < ?", [cutoff]),
+      run("DELETE FROM signals WHERE date < ?", [cutoff]),
+      run("DELETE FROM coverage WHERE interval = '5minute' AND date < ?", [cutoff]),
+      run("DELETE FROM quotes WHERE date < ?", [cutoff]),
+      run("DELETE FROM daily_bars WHERE date < ?", [dailyCutoff]),
+      run("DELETE FROM coverage WHERE interval = 'day' AND date < ?", [dailyCutoff]),
+      run(
+        "DELETE FROM jobs WHERE status NOT IN ('queued', 'running') AND substr(created_at, 1, 10) < ?",
+        [cutoff],
+      ),
+      run("DELETE FROM notices WHERE substr(created_at, 1, 10) < ?", [cutoff]),
+      run("DELETE FROM kite_sessions WHERE login_date < ?", [cutoff]),
+    ];
+    return deleted.reduce((sum, result) => sum + result.changes, 0);
+  });
+  return { removed };
 }
 
 export async function saveKiteSession(input: {
@@ -882,7 +907,7 @@ function emptyIndex(symbol: string, name: string): IndexRow {
   };
 }
 
-export async function listIndices(): Promise<IndexRow[]> {
+export async function listIndices(dateKey = istDateString(new Date())): Promise<IndexRow[]> {
   await readyDb();
   const rows = all("SELECT * FROM indices ORDER BY symbol ASC").map(indexDoc);
   const links = all("SELECT * FROM index_members").map(member);
@@ -892,7 +917,7 @@ export async function listIndices(): Promise<IndexRow[]> {
     list.push(link.instrument_token);
     bySymbol.set(link.symbol, list);
   }
-  const day = istDateString(new Date());
+  const day = dateKey;
   const indexTokens = rows
     .map((row) => row.instrument_token)
     .filter((token): token is number => token != null);
@@ -963,6 +988,7 @@ export async function deleteIndex(symbolInput: string): Promise<void> {
     run("DELETE FROM indices WHERE symbol = ?", [symbol]);
     run("DELETE FROM index_members WHERE symbol = ?", [symbol]);
     run("DELETE FROM pie_picks WHERE symbol = ?", [symbol]);
+    run("DELETE FROM desk_pies WHERE symbol = ?", [symbol]);
   });
 }
 
@@ -1007,11 +1033,11 @@ export async function listPicks(): Promise<PickDoc[]> {
   return all("SELECT * FROM picks ORDER BY tradingsymbol ASC").map(pickDoc);
 }
 
-export async function addPick(token: number): Promise<PickDoc> {
+export async function addPick(token: number, dateKey = istDateString(new Date())): Promise<PickDoc> {
   await readyDb();
   const stock = one("SELECT * FROM stocks WHERE instrument_token = ?", [token]);
   if (!stock) throw new Error("Stock is not in the book");
-  const signals = await listSignalsForToken(token, istDateString(new Date()));
+  const signals = await listSignalsForToken(token, dateKey);
   if (signals.length === 0) throw new Error("That stock has not broken the previous high or low");
   const saved = stockDoc(stock);
   run(
@@ -1066,6 +1092,31 @@ export async function removePiePick(symbolInput: string): Promise<void> {
 export async function clearPiePicks(): Promise<void> {
   await readyDb();
   getDb().exec("DELETE FROM pie_picks");
+}
+
+export async function listDeskPies(): Promise<string[]> {
+  await readyDb();
+  return all("SELECT symbol FROM desk_pies ORDER BY added_at ASC").map((row) => text(row, "symbol"));
+}
+
+export async function addDeskPie(symbolInput: string): Promise<string> {
+  const symbol = normalizeIndexSymbol(symbolInput);
+  await readyDb();
+  const index = one("SELECT symbol FROM indices WHERE symbol = ?", [symbol]);
+  if (!index) throw new Error("Index not found");
+  const saved = text(index, "symbol");
+  if (breadthSlot(saved)) throw new Error("That index is already on the desk");
+  run("INSERT INTO desk_pies (symbol, added_at) VALUES (?, ?) ON CONFLICT(symbol) DO NOTHING", [
+    saved,
+    new Date().toISOString(),
+  ]);
+  return saved;
+}
+
+export async function removeDeskPie(symbolInput: string): Promise<void> {
+  const symbol = normalizeIndexSymbol(symbolInput);
+  await readyDb();
+  run("DELETE FROM desk_pies WHERE symbol = ?", [symbol]);
 }
 
 export async function listBreakRows(dateKey: string): Promise<BreakPickRow[]> {
@@ -1337,6 +1388,10 @@ async function lastPrices(tokens: number[], dateKey: string): Promise<Map<number
     );
     for (const row of rows) map.set(num(row, "instrument_token"), num(row, "close"));
   }
+  const stillMissing = tokens.filter((token) => !map.has(token));
+  if (stillMissing.length === 0) return map;
+  const closes = await listSessionLastCloses(stillMissing, dateKey);
+  for (const [token, close] of closes) map.set(token, close);
   return map;
 }
 
@@ -1358,37 +1413,52 @@ export async function dashboardBreadth(dateKey: string): Promise<DashboardBreadt
   const indexRows = all("SELECT * FROM indices").map(indexDoc);
   const nifty = pickIndex(indexRows, "nifty50");
   const bank = pickIndex(indexRows, "banknifty");
-  const symbols = [nifty?.symbol, bank?.symbol].filter((symbol): symbol is string => Boolean(symbol));
+  const bySymbol = new Map(indexRows.map((row) => [row.symbol, row]));
+  const extras = (await listDeskPies())
+    .map((symbol) => bySymbol.get(symbol))
+    .filter((row): row is IndexDoc => Boolean(row))
+    .filter((row) => row.symbol !== nifty?.symbol && row.symbol !== bank?.symbol);
+  const tracked = [nifty, bank, ...extras].filter((row): row is IndexDoc => Boolean(row));
+  const symbols = [...new Set(tracked.map((row) => row.symbol))];
   const memberRows =
     symbols.length === 0
       ? []
       : all(`SELECT * FROM index_members WHERE symbol IN (${placeholders(symbols.length)})`, symbols).map(member);
-  const niftyTokens = memberRows.filter((row) => row.symbol === nifty?.symbol).map((row) => row.instrument_token);
-  const bankTokens = memberRows.filter((row) => row.symbol === bank?.symbol).map((row) => row.instrument_token);
+  const tokensBySymbol = new Map<string, number[]>();
+  for (const row of memberRows) {
+    const list = tokensBySymbol.get(row.symbol) ?? [];
+    list.push(row.instrument_token);
+    tokensBySymbol.set(row.symbol, list);
+  }
   const marketTokens = stockRows.map((row) => row.instrument_token);
-  const quoteTokens = [nifty?.instrument_token, bank?.instrument_token].filter(
-    (token): token is number => token != null,
-  );
+  const quoteTokens = tracked
+    .map((row) => row.instrument_token)
+    .filter((token): token is number => token != null);
   const [moves, prices] = await Promise.all([
-    classifyTokens([...marketTokens, ...niftyTokens, ...bankTokens], dateKey),
+    classifyTokens([...marketTokens, ...memberRows.map((row) => row.instrument_token)], dateKey),
     boardPrices(quoteTokens, dateKey),
   ]);
   const empty = tally([]);
   const blank = { last: null, prevClose: null, change: null, changePct: null };
-  const quoteIndex = (index: IndexDoc | null | undefined) => {
-    const price = index?.instrument_token == null ? undefined : prices.get(index.instrument_token);
+  const card = (index: IndexDoc): IndexCard => {
+    const price = index.instrument_token == null ? undefined : prices.get(index.instrument_token);
     const last = price?.last ?? null;
     const prevClose = price?.prevClose ?? null;
-    return { last, prevClose, ...priceChange(last, prevClose) };
+    return {
+      label: index.name,
+      symbol: index.symbol,
+      missing: false,
+      ...sumMoves(tokensBySymbol.get(index.symbol) ?? [], moves),
+      last,
+      prevClose,
+      ...priceChange(last, prevClose),
+    };
   };
   return {
     market: { label: "Market", symbol: null, missing: false, ...sumMoves(marketTokens, moves), ...blank },
-    nifty50: nifty
-      ? { label: nifty.name, symbol: nifty.symbol, missing: false, ...sumMoves(niftyTokens, moves), ...quoteIndex(nifty) }
-      : { label: "Nifty 50", symbol: null, missing: true, ...empty, ...blank },
-    banknifty: bank
-      ? { label: bank.name, symbol: bank.symbol, missing: false, ...sumMoves(bankTokens, moves), ...quoteIndex(bank) }
-      : { label: "Bank Nifty", symbol: null, missing: true, ...empty, ...blank },
+    nifty50: nifty ? card(nifty) : { label: "Nifty 50", symbol: null, missing: true, ...empty, ...blank },
+    banknifty: bank ? card(bank) : { label: "Bank Nifty", symbol: null, missing: true, ...empty, ...blank },
+    extras: extras.map(card),
   };
 }
 

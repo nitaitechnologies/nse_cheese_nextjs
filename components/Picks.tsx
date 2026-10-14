@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { api } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import BreakCard from "./BreakCard";
 import BreakGroups from "./BreakGroups";
 import IndexPies from "./IndexPies";
@@ -17,10 +18,15 @@ export default function Picks() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [busy, setBusy] = useState(false);
   const { openIndices, stamp, accept, toggle } = usePiePicks();
+  const { date, ready, live } = useSessionDate();
+  const dateRef = useRef(date);
+  dateRef.current = date;
 
   async function refresh() {
+    const requested = date;
     const seen = stamp();
-    const body = await api<{ stocks: BreakPickRow[]; pies: string[] }>("/api/picks");
+    const body = await api<{ stocks: BreakPickRow[]; pies: string[] }>(dated("/api/picks", requested));
+    if (dateRef.current !== requested) return;
     setStocks(body.stocks);
     accept(body.pies, seen);
     setLoaded(true);
@@ -35,22 +41,26 @@ export default function Picks() {
   }
 
   useEffect(() => {
+    if (!ready) return;
     const timer = window.setTimeout(() => {
       void refresh().catch((err) => setError(err instanceof Error ? err.message : "Could not load picked stocks"));
     }, 0);
-    const source = new EventSource("/api/stream");
-    source.addEventListener("breakout", () => {
-      void refresh().catch(() => undefined);
-    });
+    let source: EventSource | null = null;
+    if (live) {
+      source = new EventSource("/api/stream");
+      source.addEventListener("breakout", () => {
+        void refresh().catch(() => undefined);
+      });
+    }
     const poll = window.setInterval(() => {
       void refresh().catch(() => undefined);
     }, 5000);
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(poll);
-      source.close();
+      source?.close();
     };
-  }, []);
+  }, [date, ready, live]);
 
   async function uncheck(token: number) {
     setError("");
@@ -157,7 +167,7 @@ export default function Picks() {
               stocks.some((stock) => stock.events.length === 0) ? (
                 <>
                   <h2 className="mt-3 text-sm font-medium text-muted">
-                    No break today{" "}
+                    No break{" "}
                     <span className="font-mono">
                       {stocks.filter((stock) => stock.events.length === 0).length}
                     </span>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { endSession } from "./api";
+import { SessionDateField, SessionDateProvider } from "./SessionDate";
 
 const links = [
   { href: "/", label: "Today" },
@@ -17,6 +18,14 @@ const links = [
 ];
 
 export default function Shell({ children }: { children: ReactNode }) {
+  return (
+    <SessionDateProvider>
+      <ShellFrame>{children}</ShellFrame>
+    </SessionDateProvider>
+  );
+}
+
+function ShellFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const wide =
     pathname === "/" ||
@@ -39,9 +48,9 @@ export default function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh">
-      <aside className="sticky top-0 z-20 flex h-dvh w-40 shrink-0 flex-col border-r border-line bg-panel px-3 pt-[max(1rem,env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)]">
+      <aside className="sticky top-0 z-20 flex h-dvh w-48 shrink-0 flex-col border-r border-line bg-panel px-3 pt-[max(1rem,env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)]">
         <p className="px-2 text-xs uppercase tracking-[0.18em] text-muted">Breakouts</p>
-        <nav className="mt-4 flex flex-1 flex-col gap-1">
+        <nav className="mt-4 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
           {links.map((link) => {
             const active = link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
             return (
@@ -57,6 +66,7 @@ export default function Shell({ children }: { children: ReactNode }) {
               </Link>
             );
           })}
+          <SessionDateField />
         </nav>
         {logoutError ? <p className="mb-2 px-2 text-xs text-down">{logoutError}</p> : null}
         <button

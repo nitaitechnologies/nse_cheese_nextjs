@@ -1,25 +1,25 @@
 import { NextResponse } from "next/server";
 import { unauthorized } from "@/lib/guard";
 import { addPick, clearPicks, listPickRows, listPiePicks, removePick } from "@/lib/store";
-import { istDateString } from "@/lib/time";
+import { clampSessionDate, sessionDateFromRequest } from "@/lib/time";
 
-export async function GET() {
+export async function GET(request: Request) {
   const denied = await unauthorized();
   if (denied) return denied;
-  const [stocks, pies] = await Promise.all([listPickRows(istDateString(new Date())), listPiePicks()]);
+  const [stocks, pies] = await Promise.all([listPickRows(sessionDateFromRequest(request)), listPiePicks()]);
   return NextResponse.json({ stocks, pies });
 }
 
 export async function POST(request: Request) {
   const denied = await unauthorized();
   if (denied) return denied;
-  const body = (await request.json().catch(() => null)) as { instrument_token?: number } | null;
+  const body = (await request.json().catch(() => null)) as { instrument_token?: number; date?: string } | null;
   const token = Number(body?.instrument_token);
   if (!Number.isInteger(token) || token <= 0) {
     return NextResponse.json({ error: "Choose a stock from the list" }, { status: 400 });
   }
   try {
-    const pick = await addPick(token);
+    const pick = await addPick(token, clampSessionDate(body?.date));
     return NextResponse.json({ pick });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not store the stock";

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import CopySymbol from "./CopySymbol";
 import { money, signed, signedPct, tone } from "./format";
 import BreadthPie from "./Pie";
@@ -29,14 +30,16 @@ export default function PickedIndices() {
   const [indices, setIndices] = useState<IndexRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  const { date, ready } = useSessionDate();
 
   useEffect(() => {
+    if (!ready) return;
     let gone = false;
     async function refresh() {
       try {
         const [picks, book] = await Promise.all([
-          api<{ stocks: BreakPickRow[] }>("/api/picks"),
-          api<{ indices: IndexRow[] }>("/api/indices"),
+          api<{ stocks: BreakPickRow[] }>(dated("/api/picks", date)),
+          api<{ indices: IndexRow[] }>(dated("/api/indices", date)),
         ]);
         if (gone) return;
         setStocks(picks.stocks);
@@ -60,7 +63,7 @@ export default function PickedIndices() {
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, []);
+  }, [date, ready]);
 
   const symbols = [...new Set(stocks.flatMap((stock) => stock.indices))].sort((a, b) => a.localeCompare(b));
   const unlinked = stocks

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { unauthorized } from "@/lib/guard";
 import { addStock, listStockBoard, removeStock, replaceStockInstrument } from "@/lib/store";
-import { istDateString } from "@/lib/time";
+import { sessionDateFromRequest } from "@/lib/time";
 
-export async function GET() {
+export async function GET(request: Request) {
   const denied = await unauthorized();
   if (denied) return denied;
-  const stocks = await listStockBoard(istDateString(new Date()));
+  const stocks = await listStockBoard(sessionDateFromRequest(request));
   return NextResponse.json({ stocks });
 }
 

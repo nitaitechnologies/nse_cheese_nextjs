@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { unauthorized } from "@/lib/guard";
+import { RETENTION_DAYS } from "@/lib/retention";
 import { enqueueJob, getSettings, latestJob } from "@/lib/store";
 
 export async function GET() {
@@ -23,8 +24,8 @@ export async function POST(request: Request) {
   if (body?.type === "backfill") {
     const settings = await getSettings();
     const days = Number(body.days ?? settings.backfillDays);
-    if (!Number.isInteger(days) || days < 1 || days > 400) {
-      return NextResponse.json({ error: "Backfill days must be from 1 to 400" }, { status: 400 });
+    if (!Number.isInteger(days) || days < 1 || days > RETENTION_DAYS) {
+      return NextResponse.json({ error: `Backfill days must be from 1 to ${RETENTION_DAYS}` }, { status: 400 });
     }
     const job = await enqueueJob("backfill", days);
     return NextResponse.json({ job });

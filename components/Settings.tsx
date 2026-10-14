@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { RETENTION_DAYS } from "@/lib/retention";
 import { api, endSession } from "./api";
 import type { JobDoc } from "@/lib/types";
 
@@ -205,8 +206,8 @@ export default function Settings() {
         id="days"
         type="number"
         min={1}
-        max={400}
-        value={settings?.backfillDays ?? 30}
+        max={RETENTION_DAYS}
+        value={settings?.backfillDays ?? RETENTION_DAYS}
         onChange={(event) =>
           setSettings((current) =>
             current ? { ...current, backfillDays: Number(event.target.value) } : current,

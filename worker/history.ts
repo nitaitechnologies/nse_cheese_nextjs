@@ -17,6 +17,7 @@ import {
   upsertDailyBars,
 } from "../lib/store";
 import { TRACKED_INDEX_SYMBOLS } from "../lib/nse-indices";
+import { clampBackfillDays, DAILY_LOOKBACK_DAYS } from "../lib/retention";
 import {
   addCalendarDays,
   chunkDates,
@@ -173,8 +174,8 @@ export async function backfillSymbol(
   days: number,
 ): Promise<void> {
   const today = istDateString(new Date());
-  const from = addCalendarDays(today, -days);
-  const dailyFrom = addCalendarDays(from, -10);
+  const from = addCalendarDays(today, -clampBackfillDays(days));
+  const dailyFrom = addCalendarDays(from, -DAILY_LOOKBACK_DAYS);
   await ensureDaily(token, symbol, dailyFrom, today);
   await ensureIntraday(token, symbol, from, today, false);
 }

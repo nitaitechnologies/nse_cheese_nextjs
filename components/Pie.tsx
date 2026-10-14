@@ -37,7 +37,7 @@ function hasQuote(breadth: PieModel): boolean {
   return breadth.last != null || breadth.prevClose != null;
 }
 
-export default function BreadthPie({ breadth }: { breadth: PieModel }) {
+export default function BreadthPie({ breadth, onRemove }: { breadth: PieModel; onRemove?: () => void }) {
   const label = [
     breadth.label,
     `${breadth.advance} advancing`,
@@ -46,8 +46,18 @@ export default function BreadthPie({ breadth }: { breadth: PieModel }) {
     `${breadth.unpriced} without a price`,
   ].join(", ");
   return (
-    <article className="flex min-w-40 flex-1 flex-col items-center rounded-2xl border border-line bg-panel px-3 py-4">
-      <h3 className="text-center text-sm font-medium">{breadth.label}</h3>
+    <article className="relative flex min-w-40 flex-1 flex-col items-center rounded-2xl border border-line bg-panel px-3 py-4">
+      {onRemove ? (
+        <button
+          type="button"
+          aria-label={`Remove ${breadth.label}`}
+          className="absolute right-2 top-2 min-h-8 rounded-lg px-2 text-xs text-muted"
+          onClick={onRemove}
+        >
+          Remove
+        </button>
+      ) : null}
+      <h3 className={`text-center text-sm font-medium break-words ${onRemove ? "px-10" : ""}`}>{breadth.label}</h3>
       {breadth.symbol && breadth.symbol !== breadth.label ? (
         <p className="text-xs text-muted">{breadth.symbol}</p>
       ) : null}

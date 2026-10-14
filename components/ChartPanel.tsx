@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { IChartApi, IPriceLine, ISeriesApi, LineStyle, SeriesMarker, UTCTimestamp } from "lightweight-charts";
 import { priceChange } from "@/lib/breadth";
 import { chartUnix } from "@/lib/time";
-import { api } from "./api";
+import { api, dated } from "./api";
+import { useSessionDate } from "./SessionDate";
 import { money, signed, signedPct, tone } from "./format";
 import BreadthPie from "./Pie";
 import type { Candle, IndexCard, Side } from "@/lib/types";
@@ -50,24 +51,37 @@ export default function ChartPanel({
   const pdlRef = useRef<IPriceLine | null>(null);
   const fitted = useRef(false);
   const dashed = useRef<LineStyle>(2 as LineStyle);
+  const session = useSessionDate();
+  const followSession = date.length === 0;
+  const activeDate = followSession ? session.date : date;
+  const viewingLive = (!followSession || session.ready) && activeDate === session.today;
 
   useEffect(() => {
-    const query = date ? `?date=${encodeURIComponent(date)}` : "";
+    if (followSession && !session.ready) return;
+    let cancelled = false;
+    fitted.current = false;
+    const query = `?date=${encodeURIComponent(activeDate)}`;
     const timer = window.setTimeout(() => {
       void api<ChartPayload>(`/api/candles/${token}${query}`)
         .then((body) => {
+          if (cancelled) return;
           setPayload(body);
           setIndices(body.indices);
           setError("");
         })
-        .catch((err) => setError(err instanceof Error ? err.message : "Chart failed"));
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err instanceof Error ? err.message : "Chart failed");
+        });
     }, 0);
-    return () => window.clearTimeout(timer);
-  }, [token, date]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [token, activeDate, followSession, session.ready]);
 
   useEffect(() => {
-    const sessionDate = payload?.date;
-    if (!sessionDate || date) return;
+    if (!viewingLive) return;
     const source = new EventSource("/api/stream");
     source.addEventListener("quotes", (event) => {
       const rows = JSON.parse((event as MessageEvent).data) as {
@@ -76,11 +90,11 @@ export default function ChartPanel({
         candle: Candle;
       }[];
       const message = rows.find(
-        (row) => String(row.instrument_token) === token && row.date === sessionDate,
+        (row) => String(row.instrument_token) === token && row.date === activeDate,
       );
       if (!message) return;
       setPayload((current) => {
-        if (!current) return current;
+        if (!current || current.date !== activeDate) return current;
         const candles = current.candles.filter((candle) => candle.time !== message.candle.time);
         candles.push(message.candle);
         candles.sort((a, b) => a.ts - b.ts);
@@ -89,26 +103,26 @@ export default function ChartPanel({
       });
     });
     source.addEventListener("breakout", () => {
-      const query = date ? `?date=${encodeURIComponent(date)}` : "";
-      void api<ChartPayload>(`/api/candles/${token}${query}`)
+      void api<ChartPayload>(`/api/candles/${token}?date=${encodeURIComponent(activeDate)}`)
         .then((body) => {
+          if (body.date !== activeDate) return;
           setPayload(body);
           setIndices(body.indices);
         })
         .catch(() => undefined);
     });
     return () => source.close();
-  }, [payload?.date, token, date]);
+  }, [viewingLive, token, activeDate]);
 
   useEffect(() => {
-    if (date) return;
+    if (!viewingLive) return;
     const timer = window.setInterval(() => {
-      void api<{ indices: IndexCard[] }>(`/api/breadth?token=${encodeURIComponent(token)}`)
+      void api<{ indices: IndexCard[] }>(dated(`/api/breadth?token=${encodeURIComponent(token)}`, activeDate))
         .then((body) => setIndices(body.indices))
         .catch(() => undefined);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [token, date]);
+  }, [viewingLive, token, activeDate]);
 
   useEffect(() => {
     const node = box.current;
