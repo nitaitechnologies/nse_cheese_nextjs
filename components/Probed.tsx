@@ -146,10 +146,11 @@ export default function Probed() {
               stocks={visible}
               columns={2}
               headings={HEADINGS}
-              render={(stock) => (
+              mode="probe"
+              render={(stock, side) => (
                 <BreakCard
                   stock={stock}
-                  copyIndex={false}
+                  side={side}
                   openIndices={openIndices}
                   onIndex={(symbol) => void toggleIndex(symbol)}
                 >

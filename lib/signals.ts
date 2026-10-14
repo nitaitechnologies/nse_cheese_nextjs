@@ -1,4 +1,4 @@
-import type { Breakout, Candle, Probe, Score, Side } from "./types";
+import type { BreakEvent, Breakout, Candle, Probe, Score, Side } from "./types";
 
 export type EventFilter = "all" | "break" | "PDH" | "PDL" | "none";
 
@@ -161,6 +161,67 @@ function probeSide(candles: Candle[], level: number, side: Side): Probe | null {
     probeTime: probed.time,
     probeTs: probed.ts,
   };
+}
+
+function walkSide(candles: Candle[], prior: Candle[], level: number, side: Side): BreakEvent[] {
+  if (!(level > 0)) return [];
+  const events: BreakEvent[] = [];
+  let beyond = false;
+  candles.forEach((candle, index) => {
+    const history = [...prior, ...candles.slice(0, index)].slice(-20);
+    const outside = crossed(candle.close, level, side, true);
+    const inside = crossed(candle.close, level, side, false);
+    if (!beyond && outside) {
+      beyond = true;
+      events.push({
+        kind: "break",
+        side,
+        time: candle.time,
+        ts: candle.ts,
+        close: candle.close,
+        strength: scoreCandle(candle, side, level, history).strength,
+      });
+      return;
+    }
+    if (beyond && inside) {
+      beyond = false;
+      events.push({
+        kind: "probe",
+        side,
+        time: candle.time,
+        ts: candle.ts,
+        close: candle.close,
+        strength: 0,
+      });
+    }
+  });
+  return events;
+}
+
+export function detectTimeline(input: {
+  candles: Candle[];
+  priorCandles: Candle[];
+  pdh: number;
+  pdl: number;
+}): BreakEvent[] {
+  const ordered = [...input.candles].sort((a, b) => a.ts - b.ts);
+  return [
+    ...walkSide(ordered, input.priorCandles, input.pdh, "PDH"),
+    ...walkSide(ordered, input.priorCandles, input.pdl, "PDL"),
+  ].sort((a, b) => a.ts - b.ts || (a.side === "PDH" ? -1 : 1));
+}
+
+export function latestSideEvent(events: BreakEvent[], side: Side): BreakEvent | undefined {
+  let latest: BreakEvent | undefined;
+  for (const event of events) {
+    if (event.side !== side) continue;
+    if (!latest || event.ts >= latest.ts) latest = event;
+  }
+  return latest;
+}
+
+export function hasLiveSide(events: BreakEvent[], kind: BreakEvent["kind"]): boolean {
+  return (["PDH", "PDL"] as const).some((side) => latestSideEvent(events, side)?.kind === kind);
 }
 
 export function detectProbes(input: { candles: Candle[]; pdh: number; pdl: number }): Probe[] {

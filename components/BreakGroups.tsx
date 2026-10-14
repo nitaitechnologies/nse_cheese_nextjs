@@ -1,20 +1,33 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { latestSideEvent } from "@/lib/signals";
 import type { BreakPickRow, Side } from "@/lib/types";
 
 type Tab = "all" | Side;
+type Mode = "any" | "break" | "probe";
 
 function breakTime(stock: BreakPickRow, side: Side): number {
-  return stock.events.find((event) => event.side === side)?.ts ?? 0;
+  return latestSideEvent(stock.events, side)?.ts ?? 0;
 }
 
-export function sideStocks(stocks: BreakPickRow[], side: Side): BreakPickRow[] {
+function sideMatches(stock: BreakPickRow, side: Side, mode: Mode, minStrength: number): boolean {
+  if (mode === "any") return stock.events.some((event) => event.side === side);
+  const latest = latestSideEvent(stock.events, side);
+  if (latest?.kind !== mode) return false;
+  if (mode === "break" && latest.strength < minStrength) return false;
+  return true;
+}
+
+export function sideStocks(
+  stocks: BreakPickRow[],
+  side: Side,
+  mode: Mode = "any",
+  minStrength = 1,
+): BreakPickRow[] {
   return stocks
-    .filter((stock) => stock.events.some((event) => event.side === side))
-    .sort(
-      (a, b) => breakTime(b, side) - breakTime(a, side) || a.tradingsymbol.localeCompare(b.tradingsymbol),
-    );
+    .filter((stock) => sideMatches(stock, side, mode, minStrength))
+    .sort((a, b) => breakTime(b, side) - breakTime(a, side) || a.tradingsymbol.localeCompare(b.tradingsymbol));
 }
 
 function Heading({ label, count, tone }: { label: string; count: number; tone: string }) {
@@ -43,9 +56,11 @@ function Cards({
   render: (stock: BreakPickRow, side: Side) => ReactNode;
 }) {
   return (
-    <div className={columns === 2 ? "grid grid-cols-2 gap-2" : "flex flex-col gap-2"}>
+    <div className={columns === 2 ? "grid grid-cols-2 items-stretch gap-2" : "flex flex-col gap-2"}>
       {stocks.map((stock) => (
-        <div key={`${side}-${stock.instrument_token}`}>{render(stock, side)}</div>
+        <div key={`${side}-${stock.instrument_token}`} className="h-full">
+          {render(stock, side)}
+        </div>
       ))}
     </div>
   );
@@ -64,16 +79,20 @@ export default function BreakGroups({
   extra,
   columns = 1,
   headings = DEFAULT_HEADINGS,
+  mode = "any",
+  minStrength = 1,
 }: {
   stocks: BreakPickRow[];
   render: (stock: BreakPickRow, side: Side) => ReactNode;
   extra?: ReactNode;
   columns?: 1 | 2;
   headings?: typeof DEFAULT_HEADINGS;
+  mode?: Mode;
+  minStrength?: number;
 }) {
   const [tab, setTab] = useState<Tab>("all");
-  const high = sideStocks(stocks, "PDH");
-  const low = sideStocks(stocks, "PDL");
+  const high = sideStocks(stocks, "PDH", mode, minStrength);
+  const low = sideStocks(stocks, "PDL", mode, minStrength);
   const counts: Record<Tab, number> = {
     all: high.length + low.length,
     PDH: high.length,

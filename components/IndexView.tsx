@@ -121,14 +121,16 @@ export default function IndexView({ symbol }: { symbol: string }) {
             placeholder="Filter symbol or name"
             className="mt-3 min-h-12 w-full rounded-xl border border-line bg-panel px-3 outline-none"
           />
-          <div className="mt-4 flex flex-col gap-2">
+          <div className="mt-4 grid grid-cols-1 items-stretch gap-2 sm:grid-cols-2">
             {stocks.length === 0 ? (
               <p className="text-sm text-muted">Nothing linked yet.</p>
             ) : visible.length === 0 ? (
               <p className="text-sm text-muted">No stocks match this filter.</p>
             ) : (
               visible.map((stock) => (
-                <StockCard key={stock.instrument_token} stock={stock} onRemove={(token) => void remove(token)} />
+                <div key={stock.instrument_token} className="h-full">
+                  <StockCard stock={stock} onRemove={(token) => void remove(token)} />
+                </div>
               ))
             )}
           </div>

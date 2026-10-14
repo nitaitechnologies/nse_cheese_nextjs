@@ -2,18 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
-import { endSession } from "./api";
-import { SessionDateField, SessionDateProvider } from "./SessionDate";
+import { useEffect, useState, type ReactNode } from "react";
+import { api, dated, endSession } from "./api";
+import { SessionDateField, SessionDateProvider, useSessionDate } from "./SessionDate";
+import type { DeskCounts } from "@/lib/types";
 
-const links = [
-  { href: "/", label: "Today" },
-  { href: "/breaks", label: "Breaks" },
-  { href: "/probes", label: "Probed" },
-  { href: "/picks", label: "Picked" },
-  { href: "/indices", label: "Indices" },
-  { href: "/stocks", label: "Stocks" },
-  { href: "/backtest", label: "Replay" },
+const links: { href: string; label: string; count?: keyof DeskCounts }[] = [
+  { href: "/", label: "Dashboard" },
+  { href: "/breaks", label: "Breaks", count: "breaks" },
+  { href: "/probes", label: "Probed", count: "probes" },
+  { href: "/picks", label: "Picked", count: "picks" },
+  { href: "/indices", label: "Indices", count: "indices" },
+  { href: "/stocks", label: "Stocks", count: "stocks" },
   { href: "/settings", label: "Setup" },
 ];
 
@@ -31,9 +31,36 @@ function ShellFrame({ children }: { children: ReactNode }) {
     pathname === "/" ||
     pathname.startsWith("/breaks") ||
     pathname.startsWith("/probes") ||
-    pathname.startsWith("/picks");
+    pathname.startsWith("/picks") ||
+    pathname === "/stocks";
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
+  const [counts, setCounts] = useState<DeskCounts | null>(null);
+  const { date, ready } = useSessionDate();
+
+  useEffect(() => {
+    if (!ready) return;
+    let gone = false;
+    async function load() {
+      try {
+        const body = await api<DeskCounts>(dated("/api/counts", date));
+        if (!gone) setCounts(body);
+      } catch {
+        // Keep the last counts if a refresh fails.
+      }
+    }
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    const poll = window.setInterval(() => {
+      void load();
+    }, 10000);
+    return () => {
+      gone = true;
+      window.clearTimeout(timer);
+      window.clearInterval(poll);
+    };
+  }, [date, ready]);
 
   async function logout() {
     setLoggingOut(true);
@@ -58,11 +85,14 @@ function ShellFrame({ children }: { children: ReactNode }) {
                 key={link.href}
                 href={link.href}
                 aria-current={active ? "page" : undefined}
-                className={`flex min-h-11 items-center rounded-xl px-3 text-sm font-medium ${
+                className={`flex min-h-11 items-center justify-between gap-2 rounded-xl px-3 text-sm font-medium ${
                   active ? "bg-panel-2 text-gold" : "text-muted"
                 }`}
               >
-                {link.label}
+                <span>{link.label}</span>
+                {link.count && counts ? (
+                  <span className="font-mono text-xs tabular-nums">{counts[link.count]}</span>
+                ) : null}
               </Link>
             );
           })}

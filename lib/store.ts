@@ -1,11 +1,12 @@
 import { breadthSlot, classifyMove, isIndexSymbol, normalizeIndexSymbol, pickIndex, priceChange, tally } from "./breadth";
-import { detectProbes } from "./signals";
+import { detectTimeline, hasLiveSide, latestSideEvent } from "./signals";
 import { clampBackfillDays, dailyRetentionCutoff, RETENTION_DAYS, retentionCutoff } from "./retention";
 import { all, duplicateKey, fillKeptTokens, getDb, one, readyDb, run, transaction, type Row } from "./sqlite";
 import { istDateString } from "./time";
 import type {
   BreakEvent,
   BreakPickRow,
+  DeskCounts,
   Breadth,
   Candle,
   CandleDoc,
@@ -992,38 +993,68 @@ export async function deleteIndex(symbolInput: string): Promise<void> {
   });
 }
 
-function groupEvents(signals: SignalDoc[]): Map<number, BreakEvent[]> {
-  const map = new Map<number, BreakEvent[]>();
-  for (const item of signals) {
-    const list = map.get(item.instrument_token) ?? [];
-    list.push({
+function signalEvents(signals: SignalDoc[]): BreakEvent[] {
+  return signals
+    .map((item) => ({
+      kind: "break" as const,
       side: item.side,
       time: item.time,
       ts: item.ts,
       close: item.close,
       strength: item.strength,
-    });
-    map.set(item.instrument_token, list);
-  }
-  for (const list of map.values()) list.sort((a, b) => a.ts - b.ts);
-  return map;
+    }))
+    .sort((a, b) => a.ts - b.ts);
+}
+
+function withStoredStrength(events: BreakEvent[], signals: SignalDoc[]): BreakEvent[] {
+  const stamped = new Set<SignalDoc["side"]>();
+  return events.map((event) => {
+    if (event.kind !== "break" || stamped.has(event.side)) return event;
+    stamped.add(event.side);
+    const stored = signals.find((item) => item.side === event.side);
+    return stored ? { ...event, strength: stored.strength } : event;
+  });
 }
 
 export async function listStockBoard(dateKey: string): Promise<StockBoardRow[]> {
-  const [rows, signals] = await Promise.all([listStocks(), listSignals(dateKey)]);
-  const prices = await boardPrices(
-    rows.map((row) => row.instrument_token),
-    dateKey,
-  );
-  const events = groupEvents(signals);
+  const [rows, signals, picks] = await Promise.all([listStocks(), listSignals(dateKey), listPicks()]);
+  const tokens = rows.map((row) => row.instrument_token);
+  const [prices, ranges, sessions] = await Promise.all([
+    boardPrices(tokens, dateKey),
+    listPreviousRanges(tokens, dateKey),
+    listDayCandles(tokens, dateKey),
+  ]);
+  const byToken = new Map<number, SignalDoc[]>();
+  for (const item of signals) {
+    const list = byToken.get(item.instrument_token) ?? [];
+    list.push(item);
+    byToken.set(item.instrument_token, list);
+  }
+  const picked = new Set(picks.map((pick) => pick.instrument_token));
   return rows.map((row) => {
     const price = prices.get(row.instrument_token) ?? { last: null, prevClose: null };
+    const stored = byToken.get(row.instrument_token) ?? [];
+    const candles = sessions.get(row.instrument_token) ?? [];
+    const range = ranges.get(row.instrument_token);
+    const events =
+      range && candles.length > 0
+        ? withStoredStrength(
+            detectTimeline({
+              candles,
+              priorCandles: [],
+              pdh: range.high,
+              pdl: range.low,
+            }),
+            stored,
+          )
+        : signalEvents(stored);
     return {
       ...row,
       last: price.last,
       prevClose: price.prevClose,
       ...priceChange(price.last, price.prevClose),
-      events: events.get(row.instrument_token) ?? [],
+      picked: picked.has(row.instrument_token),
+      events,
     };
   });
 }
@@ -1033,12 +1064,10 @@ export async function listPicks(): Promise<PickDoc[]> {
   return all("SELECT * FROM picks ORDER BY tradingsymbol ASC").map(pickDoc);
 }
 
-export async function addPick(token: number, dateKey = istDateString(new Date())): Promise<PickDoc> {
+export async function addPick(token: number, _dateKey = istDateString(new Date())): Promise<PickDoc> {
   await readyDb();
   const stock = one("SELECT * FROM stocks WHERE instrument_token = ?", [token]);
   if (!stock) throw new Error("Stock is not in the book");
-  const signals = await listSignalsForToken(token, dateKey);
-  if (signals.length === 0) throw new Error("That stock has not broken the previous high or low");
   const saved = stockDoc(stock);
   run(
     `INSERT INTO picks (instrument_token, tradingsymbol, name, picked_at)
@@ -1119,49 +1148,39 @@ export async function removeDeskPie(symbolInput: string): Promise<void> {
   run("DELETE FROM desk_pies WHERE symbol = ?", [symbol]);
 }
 
+function latestLive(row: StockBoardRow, kind: BreakEvent["kind"]): number {
+  let latest = 0;
+  for (const side of ["PDH", "PDL"] as const) {
+    const event = latestSideEvent(row.events, side);
+    if (event?.kind === kind) latest = Math.max(latest, event.ts);
+  }
+  return latest;
+}
+
 export async function listBreakRows(dateKey: string): Promise<BreakPickRow[]> {
-  const [board, picks] = await Promise.all([listStockBoard(dateKey), listPicks()]);
-  const picked = new Set(picks.map((pick) => pick.instrument_token));
+  const board = await listStockBoard(dateKey);
   return board
-    .filter((row) => row.events.length > 0)
-    .map((row) => ({ ...row, picked: picked.has(row.instrument_token) }))
-    .sort((a, b) => latestEvent(b) - latestEvent(a) || a.tradingsymbol.localeCompare(b.tradingsymbol));
+    .filter((row) => hasLiveSide(row.events, "break"))
+    .sort((a, b) => latestLive(b, "break") - latestLive(a, "break") || a.tradingsymbol.localeCompare(b.tradingsymbol));
 }
 
 export async function listProbeRows(dateKey: string): Promise<BreakPickRow[]> {
-  const [rows, picks] = await Promise.all([listStocks(), listPicks()]);
-  const tokens = rows.map((row) => row.instrument_token);
-  const [ranges, sessions, prices] = await Promise.all([
-    listPreviousRanges(tokens, dateKey),
-    listDayCandles(tokens, dateKey),
-    boardPrices(tokens, dateKey),
-  ]);
-  const picked = new Set(picks.map((pick) => pick.instrument_token));
-  return rows
-    .map((row) => {
-      const range = ranges.get(row.instrument_token);
-      const probes = range
-        ? detectProbes({ candles: sessions.get(row.instrument_token) ?? [], pdh: range.high, pdl: range.low })
-        : [];
-      const price = prices.get(row.instrument_token) ?? { last: null, prevClose: null };
-      return {
-        ...row,
-        last: price.last,
-        prevClose: price.prevClose,
-        ...priceChange(price.last, price.prevClose),
-        picked: picked.has(row.instrument_token),
-        events: probes.map((probe) => ({
-          side: probe.side,
-          time: probe.time,
-          ts: probe.ts,
-          close: probe.close,
-          strength: 0,
-          probeTime: probe.probeTime,
-        })),
-      };
-    })
-    .filter((row) => row.events.length > 0)
-    .sort((a, b) => latestEvent(b) - latestEvent(a) || a.tradingsymbol.localeCompare(b.tradingsymbol));
+  const board = await listStockBoard(dateKey);
+  return board
+    .filter((row) => hasLiveSide(row.events, "probe"))
+    .sort((a, b) => latestLive(b, "probe") - latestLive(a, "probe") || a.tradingsymbol.localeCompare(b.tradingsymbol));
+}
+
+export async function listDeskCounts(dateKey: string): Promise<DeskCounts> {
+  const board = await listStockBoard(dateKey);
+  const indexRow = one("SELECT COUNT(*) AS n FROM indices");
+  return {
+    breaks: board.filter((row) => hasLiveSide(row.events, "break")).length,
+    probes: board.filter((row) => hasLiveSide(row.events, "probe")).length,
+    picks: board.filter((row) => row.picked).length,
+    stocks: board.length,
+    indices: indexRow ? num(indexRow, "n") : 0,
+  };
 }
 
 export async function listPickRows(dateKey: string): Promise<BreakPickRow[]> {
@@ -1171,10 +1190,6 @@ export async function listPickRows(dateKey: string): Promise<BreakPickRow[]> {
     ...(byToken.get(pick.instrument_token) ?? storedPickRow(pick)),
     picked: true,
   }));
-}
-
-function latestEvent(row: StockBoardRow): number {
-  return row.events.reduce((latest, event) => Math.max(latest, event.ts), 0);
 }
 
 function storedPickRow(pick: PickDoc): StockBoardRow {
@@ -1187,6 +1202,7 @@ function storedPickRow(pick: PickDoc): StockBoardRow {
     prevClose: null,
     change: null,
     changePct: null,
+    picked: true,
     events: [],
   };
 }

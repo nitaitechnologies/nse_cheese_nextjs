@@ -93,7 +93,7 @@ export default function Desk() {
       <header className="flex items-end justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-[0.18em] text-muted">NSE cash</p>
-          <h1 className="text-2xl font-semibold">Breakouts</h1>
+          <h1 className="text-2xl font-semibold">Dashboard</h1>
         </div>
         <p className="font-mono text-sm text-muted">{data.date}</p>
       </header>
@@ -102,42 +102,6 @@ export default function Desk() {
       <DeskBreadth breadth={breadth ?? data.breadth} date={date} onBreadth={setBreadth} />
       <PickedIndices />
       <section className="mt-6">
-        <h2 className="text-sm font-medium text-muted">Closed through the prior day</h2>
-        {data.breakouts.length === 0 ? (
-          <p className="mt-3 rounded-2xl border border-dashed border-line px-4 py-6 text-sm text-muted">
-            No 5-minute close has cleared the previous high or low yet.
-          </p>
-        ) : (
-          <div className="mt-3 flex flex-col gap-3">
-            {data.breakouts.map((signal) => (
-              <Link
-                key={`${signal.instrument_token}-${signal.side}`}
-                href={`/chart/${signal.instrument_token}?date=${signal.date}`}
-                className="rounded-2xl border border-line bg-panel p-4 active:bg-panel-2"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-lg font-semibold">{signal.tradingsymbol}</p>
-                    <p className={signal.side === "PDH" ? "text-up" : "text-down"}>
-                      {signal.side} · {signal.time} IST
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-gold px-3 py-1 text-sm font-semibold text-ink">
-                    {signal.strength}
-                  </span>
-                </div>
-                <p className="mt-3 font-mono text-sm text-muted">
-                  Close {money(signal.close)} · level {money(signal.level)}
-                </p>
-                <p className="mt-1 text-xs text-muted">
-                  Vol {signal.volumeScore} · wick {signal.wickScore} · depth {signal.depthScore}
-                </p>
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
-      <section className="mt-8">
         <h2 className="text-sm font-medium text-muted">Still inside the range</h2>
         {data.watching.length === 0 ? (
           <p className="mt-3 text-sm text-muted">No stocks in the book yet. Refresh them from Setup.</p>

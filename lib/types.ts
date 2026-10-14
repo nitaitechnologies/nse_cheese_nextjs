@@ -158,12 +158,12 @@ export type IndexRow = {
 };
 
 export type BreakEvent = {
+  kind: "break" | "probe";
   side: Side;
   time: string;
   ts: number;
   close: number;
   strength: number;
-  probeTime?: string;
 };
 
 export type Probe = {
@@ -188,7 +188,16 @@ export type StockBoardRow = StockRow & {
   prevClose: number | null;
   change: number | null;
   changePct: number | null;
+  picked: boolean;
   events: BreakEvent[];
+};
+
+export type DeskCounts = {
+  breaks: number;
+  probes: number;
+  picks: number;
+  stocks: number;
+  indices: number;
 };
 
 export type PickDoc = {
@@ -203,9 +212,7 @@ export type PiePickDoc = {
   addedAt: Date;
 };
 
-export type BreakPickRow = StockBoardRow & {
-  picked: boolean;
-};
+export type BreakPickRow = StockBoardRow;
 
 export type IndexCard = Breadth & {
   last: number | null;

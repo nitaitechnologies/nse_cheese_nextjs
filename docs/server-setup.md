@@ -2,23 +2,23 @@
 
 Live site: `https://nsecheese.nitaidemo.in.net`
 
-Coolify builds this repository with Nixpacks and serves HTTPS. One Coolify application runs the website and the Kite worker in the same container. The database is the persistent volume at `/app/data/nse.sqlite`. This PC keeps a separate file, `data/nse.sqlite`. A redeploy does not delete the Coolify volume.
+CloudPanel terminates HTTPS and proxies the domain to the Node app on port `3000`. PM2 keeps one process named `nse-cheese` running. That process starts the website and the Kite worker. The database is `/home/nitaidemo-nsecheese/nse-data/nse.sqlite`, outside the site folder. This PC keeps a separate file, `data/nse.sqlite`. A `git pull` does not delete the server database or `.env`.
 
 Deploy when the market is closed. A restart drops the Kite socket until the worker connects again.
 
-## 1. Put Coolify where ports 80 and 443 arrive
+Use Node **22.20 or newer**. The database is Node’s built-in SQLite, and older 22.x builds do not include it.
 
-Public ports 80 and 443 on `145.239.142.129` are answered by the provider's Debian machine. This Ubuntu server is reachable on SSH port `20034`.
+## 1. Create the CloudPanel site
 
-Coolify has to run on the machine that receives public ports 80 and 443. Ask the provider to forward TCP **80**, **443**, and **8000** to this VPS. Then install Coolify on this Ubuntu server:
+In CloudPanel: **Sites → Add Site → Create a Node.js Site**.
 
-```bash
-curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
-```
+| Setting | Value |
+|---|---|
+| Domain | `nsecheese.nitaidemo.in.net` |
+| Node.js version | **22** |
+| App port | **3000** |
 
-Open `http://145.239.142.129:8000` and create the admin account.
-
-## 2. Point the domain at the server
+The site user is `nitaidemo-nsecheese`. The site directory is `~/htdocs/nsecheese.nitaidemo.in.net`.
 
 In DNS, the A record is:
 
@@ -26,9 +26,49 @@ In DNS, the A record is:
 |---|---|---|
 | `nsecheese` | A | `145.239.142.129` |
 
-The full name is `nsecheese.nitaidemo.in.net`.
+In the site, open **SSL/TLS** and issue a Let’s Encrypt certificate. Zerodha allows plain HTTP only for `127.0.0.1`. The server must use HTTPS.
 
-## 3. Set the Kite redirect URL
+Leave ports **3000** and **4001** closed on the firewall. Nginx on 80/443 is the public entry. Port 4001 is the worker and stays on the machine.
+
+## 2. Check Node
+
+SSH in as `nitaidemo-nsecheese` (not root):
+
+```bash
+node -v
+```
+
+If that prints anything below `v22.20.0`:
+
+```bash
+nvm install 22.20.0
+nvm alias default 22.20.0
+hash -r
+node -v
+```
+
+## 3. Put the code on the server
+
+The server copies the app from `https://github.com/nitaitechnologies/nse_cheese_nextjs.git`. Push `master` from this PC first.
+
+Still as `nitaidemo-nsecheese`:
+
+```bash
+cd ~/htdocs/nsecheese.nitaidemo.in.net
+git clone https://github.com/nitaitechnologies/nse_cheese_nextjs.git .
+npm ci
+npm run build
+```
+
+`npm run build` compiles the site and the worker. The first build needs roughly 2 GB of RAM. On a small VPS, add swap before building.
+
+Keep the database outside the site folder:
+
+```bash
+mkdir -p ~/nse-data
+```
+
+## 4. Set the Kite redirect URL
 
 In the Zerodha developer console, set the app redirect URL to exactly:
 
@@ -36,32 +76,17 @@ In the Zerodha developer console, set the app redirect URL to exactly:
 https://nsecheese.nitaidemo.in.net/api/kite/callback
 ```
 
-Zerodha allows plain HTTP only for `127.0.0.1`. The server must use HTTPS.
+## 5. Environment file
 
-## 4. Create the Coolify application
+Create `~/htdocs/nsecheese.nitaidemo.in.net/.env`. Copy the secret values from `.env.server` on this PC.
 
-Push this project to `https://github.com/nitaitechnologies/nse_cheese_nextjs.git` first. Coolify builds the commit on GitHub, and `nixpacks.toml` has to be in that commit.
-
-In Coolify: **+ New** → **Application** → GitHub repository `nitaitechnologies/nse_cheese_nextjs`.
-
-| Setting | Value |
-|---|---|
-| Build pack | Nixpacks |
-| Branch | the branch you pushed |
-| Port | `3000` |
-| Domain | `https://nsecheese.nitaidemo.in.net` |
-| Health check path | `/api/health` |
-
-Persistent storage, one volume:
-
-| Destination path |
-|---|
-| `/app/data` |
-
-Runtime environment variables. Leave them off for the build. Copy the values from `.env.server` on this PC.
+```bash
+nano .env
+chmod 600 .env
+```
 
 ```text
-SQLITE_PATH=/app/data/nse.sqlite
+SQLITE_PATH=/home/nitaidemo-nsecheese/nse-data/nse.sqlite
 SESSION_SECRET=
 DASHBOARD_PASSWORD_HASH_B64=
 KITE_API_KEY=
@@ -69,33 +94,69 @@ KITE_API_SECRET=
 KITE_REDIRECT_URL=https://nsecheese.nitaidemo.in.net/api/kite/callback
 PUSHOVER_APP_TOKEN=
 PUSHOVER_USER_KEY=
+PORT=3000
+WORKER_PORT=4001
 TZ=Asia/Kolkata
 ```
 
-Leave `WORKER_INTERNAL_URL` unset. The start command runs the worker on `127.0.0.1:4001` inside the same container.
+`PORT` must match the CloudPanel app port. Leave `WORKER_INTERNAL_URL` unset. The start script sets it to `http://127.0.0.1:4001` for the worker in the same process.
 
-Click Deploy. The first build takes several minutes. The volume starts empty.
+## 6. Keep it running with PM2
 
-## 5. Open the site
+From the site directory:
 
-Visit `https://nsecheese.nitaidemo.in.net`. Coolify issues the certificate for the domain.
+```bash
+npm install pm2@latest -g
+pm2 start scripts/start-production.mjs --name nse-cheese --node-args="--env-file=.env"
+pm2 save
+curl -sS http://127.0.0.1:3000/api/health
+```
 
-Log in with the dashboard password, connect Kite, then from Settings sync the indices and backfill history.
+`--env-file` matters. The Next process and the Kite worker both need those variables. A healthy response is JSON with `"ok":true`. If curl fails, run `pm2 logs nse-cheese`.
+
+So it comes back after a reboot:
+
+```bash
+echo $PATH
+crontab -e
+```
+
+Add these two lines, using the path you just printed:
+
+```bash
+PATH=PASTE_THAT_PATH_HERE
+@reboot pm2 resurrect &> /dev/null
+```
+
+## 7. Open the site
+
+Visit `https://nsecheese.nitaidemo.in.net`. Log in with the dashboard password, connect Kite, then from Settings sync the indices and backfill history. The SQLite file is created on first start.
 
 ## Later updates
 
-Push to the same branch. In Coolify, click Deploy. The `/app/data` volume stays in place.
+Do this while the market is closed. A restart drops the Kite socket until the worker connects again.
+
+**1. On this PC**, commit the changes and push `master` to `https://github.com/nitaitechnologies/nse_cheese_nextjs.git`. The server only sees what is already on GitHub.
+
+**2. On the server**, as `nitaidemo-nsecheese`:
+
+```bash
+cd ~/htdocs/nsecheese.nitaidemo.in.net
+git pull
+npm ci
+npm run build
+pm2 restart nse-cheese
+curl -sS http://127.0.0.1:3000/api/health
+```
+
+Leave `.env` and `~/nse-data/nse.sqlite` as they are. `git pull` does not touch them.
+
+When curl returns `"ok":true`, reload `https://nsecheese.nitaidemo.in.net`.
 
 ## Backup
 
-While the market is closed, from the Coolify server:
+While the market is closed, as `nitaidemo-nsecheese`:
 
 ```bash
-docker ps --format '{{.Names}}' | grep nse
-```
-
-Use the application container name from that list:
-
-```bash
-docker cp CONTAINER:/app/data/nse.sqlite /root/nse.sqlite.backup
+cp ~/nse-data/nse.sqlite ~/nse-data/nse.sqlite.backup
 ```

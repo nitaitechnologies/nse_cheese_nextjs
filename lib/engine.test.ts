@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detectBreaks, detectProbes, eventVisible } from "./signals";
+import { clock } from "../components/format";
+import { detectBreaks, detectProbes, detectTimeline, eventVisible, hasLiveSide } from "./signals";
 import {
   addCalendarDays,
   bucketFromDate,
@@ -176,6 +177,78 @@ describe("failed probes", () => {
       ],
     });
     assert.equal(probes.length, 0);
+  });
+});
+
+describe("break and probe timeline", () => {
+  it("keeps a probed high off the live break list", () => {
+    const events = detectTimeline({
+      pdh: 100,
+      pdl: 90,
+      priorCandles: [],
+      candles: [
+        candle("09:40", 99.4, 100.8, 99.3, 100.4, 200),
+        candle("09:55", 100.3, 100.6, 99.4, 99.7, 180),
+      ],
+    });
+    assert.deepEqual(
+      events.map((event) => [event.kind, event.side, event.time]),
+      [
+        ["break", "PDH", "09:40"],
+        ["probe", "PDH", "09:55"],
+      ],
+    );
+    assert.equal(hasLiveSide(events, "break"), false);
+    assert.equal(hasLiveSide(events, "probe"), true);
+  });
+
+  it("puts a high back on the live break list after it closes through again", () => {
+    const events = detectTimeline({
+      pdh: 100,
+      pdl: 90,
+      priorCandles: [],
+      candles: [
+        candle("09:40", 99.4, 100.8, 99.3, 100.4, 200),
+        candle("09:55", 100.3, 100.6, 99.4, 99.7, 180),
+        candle("10:00", 99.8, 101, 99.7, 100.6, 220),
+      ],
+    });
+    assert.deepEqual(
+      events.map((event) => [event.kind, event.time]),
+      [
+        ["break", "09:40"],
+        ["probe", "09:55"],
+        ["break", "10:00"],
+      ],
+    );
+    assert.equal(hasLiveSide(events, "break"), true);
+    assert.equal(hasLiveSide(events, "probe"), false);
+  });
+
+  it("treats a later return inside as a probe even after a second break", () => {
+    const events = detectTimeline({
+      pdh: 100,
+      pdl: 90,
+      priorCandles: [],
+      candles: [
+        candle("09:40", 99.4, 100.8, 99.3, 100.4, 200),
+        candle("09:55", 100.3, 100.6, 99.4, 99.7, 180),
+        candle("10:00", 99.8, 101, 99.7, 100.6, 220),
+        candle("10:05", 100.4, 100.5, 99.2, 99.5, 160),
+      ],
+    });
+    assert.equal(events.at(-1)?.kind, "probe");
+    assert.equal(hasLiveSide(events, "break"), false);
+    assert.equal(hasLiveSide(events, "probe"), true);
+  });
+});
+
+describe("session clock labels", () => {
+  it("writes breaks as 9:40am and 10am", () => {
+    assert.equal(clock("09:40"), "9:40am");
+    assert.equal(clock("09:55"), "9:55am");
+    assert.equal(clock("10:00"), "10am");
+    assert.equal(clock("14:35"), "2:35pm");
   });
 });
 

@@ -1,5 +1,4 @@
 import type { EventFilter } from "@/lib/signals";
-import type { BreakEvent, Side } from "@/lib/types";
 
 const OPTIONS: { id: EventFilter; label: string }[] = [
   { id: "all", label: "All" },
@@ -8,17 +7,6 @@ const OPTIONS: { id: EventFilter; label: string }[] = [
   { id: "PDL", label: "Prev low" },
   { id: "none", label: "No break" },
 ];
-
-export function eventText(side: Side): string {
-  return side === "PDH" ? "5m break of previous day high" : "5m break of previous day low";
-}
-
-export function eventLine(event: Pick<BreakEvent, "side" | "time" | "probeTime">): string {
-  if (!event.probeTime) return `${eventText(event.side)} · ${event.time} IST`;
-  return event.side === "PDH"
-    ? `Closed above the previous day high at ${event.probeTime}, then below at ${event.time} IST`
-    : `Closed below the previous day low at ${event.probeTime}, then above at ${event.time} IST`;
-}
 
 export default function EventFilters({
   value,

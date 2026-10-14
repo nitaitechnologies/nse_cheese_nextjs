@@ -8,7 +8,8 @@ import BreakCard from "./BreakCard";
 import BreakGroups from "./BreakGroups";
 import IndexPies from "./IndexPies";
 import { usePiePicks } from "./usePiePicks";
-import type { BreakPickRow } from "@/lib/types";
+import { latestSideEvent } from "@/lib/signals";
+import type { BreakPickRow, Side } from "@/lib/types";
 
 const STRENGTHS = [1, 2, 3, 4, 5] as const;
 
@@ -120,24 +121,23 @@ export default function Breaks() {
 
   const needle = query.trim().toLowerCase();
   const searched = stocks.filter((stock) => matchesQuery(stock, needle));
-  const strengthCounts = STRENGTHS.map((min) =>
-    searched.reduce(
-      (total, stock) => total + stock.events.filter((event) => event.strength >= min).length,
-      0,
-    ),
+  function liveBreaks(stock: BreakPickRow, min: number): Side[] {
+    return (["PDH", "PDL"] as const).filter((side) => {
+      const latest = latestSideEvent(stock.events, side);
+      return latest?.kind === "break" && latest.strength >= min;
+    });
+  }
+  const strengthCounts = STRENGTHS.map(
+    (min) => searched.reduce((total, stock) => total + liveBreaks(stock, min).length, 0),
   );
-  const visible = searched
-    .map((stock) => ({
-      ...stock,
-      events: stock.events.filter((event) => event.strength >= minStrength),
-    }))
-    .filter((stock) => stock.events.length > 0);
+  const visible = searched.filter((stock) => liveBreaks(stock, minStrength).length > 0);
 
   return (
     <main className="px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-8">
       <h1 className="text-2xl font-semibold">Breaks</h1>
       <p className="mt-1 text-sm text-muted">
-        Stocks that closed through the previous day high or low. Check a name to store it. Saved names are on{" "}
+        Stocks still closed through the previous day high or low. A name that broke and then probed stays on Probed.
+        Check a name to store it. Saved names are on{" "}
         <Link href="/picks" className="text-gold">
           Picked
         </Link>
@@ -155,7 +155,7 @@ export default function Breaks() {
         {!loaded ? (
           <p className="text-sm text-muted">Loading breaks…</p>
         ) : stocks.length === 0 ? (
-          <p className="text-sm text-muted">No stock has closed through the previous high or low yet.</p>
+          <p className="text-sm text-muted">No stock is still closed through the previous high or low.</p>
         ) : (
           <>
           <div className="flex items-center gap-2 overflow-x-auto">
@@ -186,10 +186,12 @@ export default function Breaks() {
             <BreakGroups
               stocks={visible}
               columns={2}
-              render={(stock) => (
+              mode="break"
+              minStrength={minStrength}
+              render={(stock, side) => (
                 <BreakCard
                   stock={stock}
-                  copyIndex={false}
+                  side={side}
                   openIndices={openIndices}
                   onIndex={(symbol) => void toggleIndex(symbol)}
                 >

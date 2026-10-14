@@ -147,7 +147,7 @@ export default function Stocks() {
       />
       <EventFilters value={eventFilter} onChange={setEventFilter} />
       {error ? <p className="mt-3 text-sm text-down">{error}</p> : null}
-      <div className="mt-4 flex flex-col gap-2">
+      <div className="mt-4 grid grid-cols-1 items-stretch gap-2 sm:grid-cols-2">
         {!loaded ? (
           <p className="text-sm text-muted">Loading stocks…</p>
         ) : stocks.length === 0 ? (
@@ -156,7 +156,9 @@ export default function Stocks() {
           <p className="text-sm text-muted">No stocks match this filter.</p>
         ) : (
           visible.map((stock) => (
-            <StockCard key={stock.instrument_token} stock={stock} onRemove={(token) => void remove(token)} />
+            <div key={stock.instrument_token} className="h-full">
+              <StockCard stock={stock} onRemove={(token) => void remove(token)} />
+            </div>
           ))
         )}
       </div>

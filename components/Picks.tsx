@@ -106,10 +106,14 @@ export default function Picks() {
             Stocks checked on{" "}
             <Link href="/breaks" className="text-gold">
               Breaks
-            </Link>{" "}
-            or{" "}
+            </Link>
+            ,{" "}
             <Link href="/probes" className="text-gold">
               Probed
+            </Link>
+            , or{" "}
+            <Link href="/stocks" className="text-gold">
+              Stocks
             </Link>
             . Reset clears every check.
           </p>
@@ -172,14 +176,13 @@ export default function Picks() {
                       {stocks.filter((stock) => stock.events.length === 0).length}
                     </span>
                   </h2>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 items-stretch gap-2">
                   {stocks
                     .filter((stock) => stock.events.length === 0)
                     .map((stock) => (
+                      <div key={stock.instrument_token} className="h-full">
                       <BreakCard
-                        key={stock.instrument_token}
                         stock={stock}
-                        copyIndex={false}
                         openIndices={openIndices}
                         onIndex={(symbol) => void toggleIndex(symbol)}
                       >
@@ -217,15 +220,16 @@ export default function Picks() {
                           </button>
                         )}
                       </BreakCard>
+                      </div>
                     ))}
                   </div>
                 </>
               ) : null
             }
-            render={(stock) => (
+            render={(stock, side) => (
             <BreakCard
               stock={stock}
-              copyIndex={false}
+              side={side}
               openIndices={openIndices}
               onIndex={(symbol) => void toggleIndex(symbol)}
             >

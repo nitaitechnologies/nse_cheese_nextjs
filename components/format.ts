@@ -22,6 +22,17 @@ export function signedPct(value: number | null | undefined): string {
   return body;
 }
 
+export function clock(time: string): string {
+  const [hourText, minuteText] = time.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return time;
+  const suffix = hour >= 12 ? "pm" : "am";
+  const hour12 = hour % 12 || 12;
+  if (minute === 0) return `${hour12}${suffix}`;
+  return `${hour12}:${String(minute).padStart(2, "0")}${suffix}`;
+}
+
 export function money(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   return value.toLocaleString("en-IN", {
